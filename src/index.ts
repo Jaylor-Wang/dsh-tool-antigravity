@@ -8,6 +8,8 @@
  */
 
 import type { Context } from "@deepseek-ai/cordis";
+import type {} from "@deepseek-ai/dsh-client-connection";
+import type {} from "@deepseek-ai/dsh-host-webserver";
 import { AntigravityAdapter } from "./llm-adapter.js";
 import { AntigravityAuthService, createAntigravityAuthService } from "./auth-service.js";
 import { CredentialOperationError, ANTIGRAVITY_TOKEN_ENDPOINT, ANTIGRAVITY_REVOKE_ENDPOINT } from "./credential-coordinator.js";
@@ -23,7 +25,11 @@ import {
   ANTIGRAVITY_AUTH_RPC_NAMESPACE,
   createAntigravityAuthRpcClient
 } from "./rpc-contract.js";
+import { registerAccountRoutes } from "./account-routes.js";
+import { createLoopbackRpcGuard } from "./loopback-rpc.js";
+import { ANTIGRAVITY_AUTH_RPC_ENDPOINTS, handleAntigravityAuthRpc } from "./rpc.js";
 import { openPlatformBrowser } from "./utils/process-opener.js";
+
 
 export const ANTIGRAVITY_PLUGIN_ID = "dsh-tool-antigravity";
 export const ANTIGRAVITY_LEGACY_PLUGIN_ID = "dsh-antigravity-auth";
@@ -96,141 +102,22 @@ export function apply(ctx: Context): void {
     });
   }
 
-  // 3. Register Loopback RPC Routes on connection if present
-  const connection = ctx.get("connection");
-  const webServer = ctx.get("webServer");
-  if (connection?.fetch?.register) {
-    const isLoopback =
-      !webServer?.host ||
-      webServer.host === "127.0.0.1" ||
-      webServer.host === "localhost" ||
-      webServer.host === "::1";
-    const endpoints = [
-      "status",
-      "models",
-      "usage",
-      "acknowledge-risk",
-      "login",
-      "cancel",
-      "logout",
-      "revoke"
-    ];
-
-    for (const endpoint of endpoints) {
-      connection.fetch.register({
-        path: `/api/${ANTIGRAVITY_AUTH_RPC_NAMESPACE}/${endpoint}`,
-        methods: ["POST"],
-        requestBody: "buffered",
-        fetch: async (req: Request | { request: Request }) => {
-          const request = req instanceof Request ? req : req.request;
-          let rpcId: string | undefined;
-          let body: Record<string, unknown> = {};
-          try {
-            const raw = (await request.json().catch(() => ({}))) as unknown;
-            if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-              body = raw as Record<string, unknown>;
-              if ("rpcId" in raw && typeof raw.rpcId === "string") {
-                rpcId = raw.rpcId;
-              }
-            }
-          } catch {
-            // ignore
-          }
-
-          const makeResponse = (
-            result:
-              | { ok: true; value: unknown }
-              | { ok: false; error: { code: string; message: string; details?: Record<string, unknown> } }
-          ) => {
-            if (rpcId !== undefined) {
-              return Response.json({
-                type: "server-response",
-                rpcId,
-                result: {
-                  ...result,
-                  ...(result.ok === false ? { error: { ...result.error, details: result.error.details ?? {} } } : {})
-                }
-              });
-            }
-            return Response.json(result);
-          };
-
-          if (!isLoopback) {
-            return makeResponse({
-              ok: false,
-              error: {
-                code: "loopback-required",
-                message: "Antigravity Auth RPC requires loopback WebServer binding.",
-                details: {}
-              }
-            });
-          }
-
-          const rawPayload = body.payload;
-          const payload =
-            rawPayload && typeof rawPayload === "object" && !Array.isArray(rawPayload)
-              ? (rawPayload as Record<string, unknown>)
-              : body;
-
-          try {
-            switch (endpoint) {
-              case "status": {
-                const status = await service.status();
-                return makeResponse({ ok: true, value: { status } });
-              }
-              case "usage": {
-                const force = Boolean(payload.force);
-                const usage = await service.usage(undefined, force);
-                return makeResponse({ ok: true, value: usage });
-              }
-              case "acknowledge-risk": {
-                const ack = service.acknowledgeRisk();
-                return makeResponse({ ok: true, value: ack });
-              }
-              case "login": {
-                const start = await service.startLogin();
-                if (start.authorizationUrl) {
-                  void openPlatformBrowser(start.authorizationUrl);
-                }
-                return makeResponse({ ok: true, value: start });
-              }
-              case "cancel": {
-                const cancel = await service.cancelLogin();
-                return makeResponse({ ok: true, value: cancel });
-              }
-              case "logout": {
-                const logout = await service.logout();
-                return makeResponse({ ok: true, value: logout });
-              }
-              case "revoke": {
-                const revoke = await service.revoke(true);
-                return makeResponse({ ok: true, value: revoke });
-              }
-              default:
-                return makeResponse({
-                  ok: false,
-                  error: { code: "not-found", message: "Endpoint not found", details: {} }
-                });
-            }
-          } catch (error: unknown) {
-            const code =
-              error && typeof error === "object" && "code" in error && typeof error.code === "string"
-                ? error.code
-                : "internal";
-            const message = error instanceof Error ? error.message : "Internal error";
-            return makeResponse({
-              ok: false,
-              error: {
-                code,
-                message,
-                details: {}
-              }
-            });
-          }
-        }
-      });
+  // 3. Register Loopback RPC Routes once Connection is available.
+  ctx.inject(["connection"], (connectionCtx) => {
+    const webServer = connectionCtx.get("webServer") as { host?: string } | undefined;
+    const guard = createLoopbackRpcGuard(webServer?.host, (endpoint, payload, signal) =>
+      handleAntigravityAuthRpc(service, endpoint, payload, signal)
+    );
+    if (guard.mode === "blocked") {
+      connectionCtx.logger.warn("antigravity-auth: account RPC is disabled because the WebServer is not loopback-bound");
     }
-  }
+    return registerAccountRoutes(
+      connectionCtx.connection,
+      ANTIGRAVITY_AUTH_RPC_NAMESPACE,
+      ANTIGRAVITY_AUTH_RPC_ENDPOINTS,
+      guard.handler
+    );
+  });
 }
 
 export {

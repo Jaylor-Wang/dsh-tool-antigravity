@@ -3,6 +3,8 @@ import { Buffer } from "node:buffer";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
+import { Context } from "@deepseek-ai/cordis";
+import type { ConnectionRpcHandler, HostConnectionHandle } from "@deepseek-ai/dsh-client-connection";
 import {
   buildWireIdentityHeaders,
   createWireIdentity,
@@ -14,6 +16,11 @@ import { TlsSocketPool } from "../src/socket-pool.js";
 import { createAuthStore, AUTH_STORE_LOCK_NAME } from "../src/credential-store.js";
 import { normalizeProjectId } from "../src/project-context.js";
 import { createAntigravityAuthRpcClient, type AntigravityAuthConnectionRpc } from "../src/rpc-contract.js";
+import { registerAccountRoutes } from "../src/account-routes.js";
+import { createLoopbackRpcGuard } from "../src/loopback-rpc.js";
+import { handleAntigravityAuthRpc } from "../src/rpc.js";
+import { createAntigravityAuthService } from "../src/auth-service.js";
+import * as main from "../src/index.js";
 
 describe("Wire Identity", () => {
   it("generates exact audited provider headers with truthful DSH attribution", () => {
@@ -180,3 +187,108 @@ describe("RPC Contract & Client Connection Protocol", () => {
     expect(recordedCalls[0]?.endpoint).toBe("antigravity-auth/status");
   });
 });
+
+describe("Host account RPC routes", () => {
+  it("registers exact /api routes after connection inject and returns a server-response envelope", async () => {
+    const registered: Array<{ path: string; methods: readonly string[] }> = [];
+    const fetchers = new Map<string, (request: Request) => Promise<Response>>();
+    const connection = {
+      fetch: {
+        register: (route: { path: string; methods: readonly string[]; fetch: (request: Request) => Promise<Response> }) => {
+          registered.push({ path: route.path, methods: route.methods });
+          fetchers.set(route.path, route.fetch);
+          return async () => {
+            fetchers.delete(route.path);
+          };
+        }
+      }
+    } as unknown as HostConnectionHandle;
+    const service = createAntigravityAuthService();
+    const handler: ConnectionRpcHandler = (endpoint, payload, signal) =>
+      handleAntigravityAuthRpc(service, endpoint, payload, signal);
+    const dispose = registerAccountRoutes(
+      connection,
+      "antigravity-auth",
+      ["status", "usage"],
+      createLoopbackRpcGuard("127.0.0.1", handler).handler
+    );
+
+    expect(registered.map((route) => route.path)).toEqual([
+      "/api/antigravity-auth/status",
+      "/api/antigravity-auth/usage"
+    ]);
+
+    const rpcId = "account-status-test";
+    const response = await fetchers.get("/api/antigravity-auth/status")!(
+      new Request("http://127.0.0.1/api/antigravity-auth/status", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          type: "client-request",
+          rpcId,
+          method: "antigravity-auth/status",
+          payload: {}
+        })
+      })
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      type: "server-response",
+      rpcId,
+      result: { ok: true }
+    });
+    expect(body.result.value.status.login.phase).toBeDefined();
+
+    const usage = await fetchers.get("/api/antigravity-auth/usage")!(
+      new Request("http://127.0.0.1/api/antigravity-auth/usage", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          type: "client-request",
+          rpcId: "account-usage-test",
+          method: "antigravity-auth/usage",
+          payload: { force: false }
+        })
+      })
+    );
+    const usageBody = await usage.json();
+    expect(usageBody.result.ok).toBe(true);
+    expect(typeof usageBody.result.value.state).toBe("string");
+
+    await dispose();
+    expect(fetchers.size).toBe(0);
+  });
+
+  it("defers Host route registration until connection is injected", async () => {
+    const ctx = new Context();
+    const registered: string[] = [];
+    ctx.provide("llm", {
+      listProviders: () => [],
+      registerAdapter: () => {}
+    });
+    await ctx.plugin({
+      name: main.name,
+      inject: [...main.inject],
+      provide: [...main.provide],
+      apply: main.apply
+    });
+    expect(registered).toEqual([]);
+
+    ctx.provide("connection", {
+      fetch: {
+        register: (route: { path: string }) => {
+          registered.push(route.path);
+          return async () => {};
+        }
+      }
+    });
+    ctx.provide("webServer", { host: "127.0.0.1" });
+    await ctx.fiber.await();
+    expect(registered).toContain("/api/antigravity-auth/status");
+    expect(registered).toContain("/api/antigravity-auth/usage");
+    await ctx.fiber.dispose();
+  });
+});
+
+
