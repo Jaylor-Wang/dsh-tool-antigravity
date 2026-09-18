@@ -121,7 +121,8 @@ export function apply(ctx: Context): void {
         path: `/api/${ANTIGRAVITY_AUTH_RPC_NAMESPACE}/${endpoint}`,
         methods: ["POST"],
         requestBody: "buffered",
-        fetch: async ({ request }: { request: Request }) => {
+        fetch: async (req: Request | { request: Request }) => {
+          const request = req instanceof Request ? req : req.request;
           let rpcId: string | undefined;
           let body: Record<string, unknown> = {};
           try {
