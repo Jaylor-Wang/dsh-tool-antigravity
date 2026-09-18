@@ -31,3 +31,7 @@ Thumbs.db
 *.njsproj
 *.sln
 *.sw?
+
+# Planning & Local Notes
+Development Plan*.md
+
