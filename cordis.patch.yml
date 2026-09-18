@@ -1,0 +1,7 @@
+# The bootstrap shell keeps the capability rows independently addressable.
+# OAuth, LLM routing, and private I/O stay on Host; each row owns its public capability seam.
+- insert:
+    - id: antigravity-auth
+      name: 'dsh-tool-antigravity'
+    - id: antigravity-image
+      name: 'dsh-tool-antigravity/image'
