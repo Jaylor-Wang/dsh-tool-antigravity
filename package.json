@@ -1,7 +1,7 @@
 {
   "name": "dsh-tool-antigravity",
   "version": "0.1.0",
-  "description": "High-performance, streamlined Antigravity OAuth LLM routing and image generation capability bundle for DeepSeek Harness",
+  "description": "High-performance Antigravity OAuth LLM routing and image generation capability bundle for DeepSeek Harness",
   "type": "module",
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
@@ -9,83 +9,88 @@
   "publishConfig": {
     "access": "public"
   },
-  "author": "Jaylor-Wang",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/Jaylor-Wang/dsh-tool-antigravity.git"
-  },
-  "homepage": "https://github.com/Jaylor-Wang/dsh-tool-antigravity#readme",
-  "bugs": {
-    "url": "https://github.com/Jaylor-Wang/dsh-tool-antigravity/issues"
-  },
-  "main": "lib/index.mjs",
-  "types": "lib/index.d.mts",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
   "exports": {
     ".": {
-      "types": "./lib/index.d.mts",
-      "default": "./lib/index.mjs"
+      "types": "./lib/types/index.d.ts",
+      "import": "./lib/index.js",
+      "default": "./lib/index.js"
     },
     "./client": {
-      "types": "./lib/client.d.cts",
+      "types": "./lib/types/client/index.d.ts",
       "default": "./lib/client.cjs"
     },
     "./image": {
-      "types": "./lib/image.d.mts",
-      "default": "./lib/image.mjs"
+      "types": "./lib/types/image.d.ts",
+      "import": "./lib/image.js",
+      "default": "./lib/image.js"
     },
     "./rpc-contract": {
-      "types": "./lib/rpc-contract.d.mts",
-      "default": "./lib/rpc-contract.mjs"
+      "types": "./lib/types/rpc-contract.d.ts",
+      "import": "./lib/rpc-contract.js",
+      "default": "./lib/rpc-contract.js"
     },
     "./project-context": {
-      "types": "./lib/project-context.d.mts",
-      "default": "./lib/project-context.mjs"
+      "types": "./lib/types/project-context.d.ts",
+      "import": "./lib/project-context.js",
+      "default": "./lib/project-context.js"
     },
     "./wire-identity": {
-      "types": "./lib/wire-identity.d.mts",
-      "default": "./lib/wire-identity.mjs"
+      "types": "./lib/types/wire-identity.d.ts",
+      "import": "./lib/wire-identity.js",
+      "default": "./lib/wire-identity.js"
     },
     "./invariant": {
-      "types": "./lib/invariant.d.mts",
-      "default": "./lib/invariant.mjs"
+      "types": "./lib/types/invariant.d.ts",
+      "import": "./lib/invariant.js",
+      "default": "./lib/invariant.js"
     },
     "./llm-adapter": {
-      "types": "./lib/llm-adapter.d.mts",
-      "default": "./lib/llm-adapter.mjs"
+      "types": "./lib/types/llm-adapter.d.ts",
+      "import": "./lib/llm-adapter.js",
+      "default": "./lib/llm-adapter.js"
     },
     "./private-transport": {
-      "types": "./lib/private-transport.d.mts",
-      "default": "./lib/private-transport.mjs"
+      "types": "./lib/types/private-transport.d.ts",
+      "import": "./lib/private-transport.js",
+      "default": "./lib/private-transport.js"
     },
     "./replay": {
-      "types": "./lib/replay.d.mts",
-      "default": "./lib/replay.mjs"
+      "types": "./lib/types/replay.d.ts",
+      "import": "./lib/replay.js",
+      "default": "./lib/replay.js"
     },
     "./quota": {
-      "types": "./lib/quota.d.mts",
-      "default": "./lib/quota.mjs"
+      "types": "./lib/types/quota.d.ts",
+      "import": "./lib/quota.js",
+      "default": "./lib/quota.js"
     },
     "./media-admission": {
-      "types": "./lib/media-admission.d.mts",
-      "default": "./lib/media-admission.mjs"
+      "types": "./lib/types/media-admission.d.ts",
+      "import": "./lib/media-admission.js",
+      "default": "./lib/media-admission.js"
     },
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
   "files": [
-    "lib/*.mjs",
-    "lib/*.mjs.map",
+    "lib/*.js",
+    "lib/*.js.map",
     "lib/*.cjs",
     "lib/*.cjs.map",
-    "lib/*.d.mts",
-    "lib/*.d.mts.map",
-    "lib/*.d.cts",
-    "lib/*.d.cts.map",
+    "lib/types/**/*.d.ts",
+    "lib/types/**/*.d.ts.map",
     "cordis.patch.yml",
     "README.md",
     "README.zh.md",
     "LICENSE"
   ],
+  "scripts": {
+    "build": "node scripts/clean.mjs && tsc -p tsconfig.build.host.json && tsc -p tsconfig.build.client.json && tsdown",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.host.json --noEmit && tsc -p tsconfig.client.json --noEmit"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
@@ -124,30 +129,60 @@
     "@deepseek-ai/dsh-session": "^0.1.5-rc.1",
     "@deepseek-ai/dsh-settings": "^0.1.5-rc.1",
     "@deepseek-ai/dsh-tools": "^0.1.5-rc.1",
+    "@deepseek-ai/dsh-web": "^0.1.5-rc.1",
     "@deepseek-ai/schemastery": "^3.18.2",
     "react": "^18.2.0"
   },
   "devDependencies": {
     "@cortexkit/antigravity-auth-core": "2.2.0",
-    "@deepseek-ai/cordis": "file:D:/nodejs/node_global/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/cordis",
-    "@deepseek-ai/dsh-agent": "file:D:/nodejs/node_global/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-agent",
-    "@deepseek-ai/dsh-attachment": "file:D:/nodejs/node_global/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-attachment",
-    "@deepseek-ai/dsh-invariants": "file:D:/nodejs/node_global/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-invariants",
-    "@deepseek-ai/dsh-llm": "file:D:/nodejs/node_global/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-llm",
-    "@deepseek-ai/dsh-tools": "file:D:/nodejs/node_global/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tools",
-    "@deepseek-ai/schemastery": "file:D:/nodejs/node_global/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/schemastery",
-    "@types/node": "^22.19.0",
-    "@types/react": "~18.3.18",
-    "@types/react-dom": "~18.3.5",
+    "@deepseek-ai/cordis": "4.0.2",
+    "@deepseek-ai/dsh-agent": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-agent-loop": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-api-remotes": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-attachment": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-brand": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-client-connection": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-client-locale": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-client-ui-primitives": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-client-ui-renderer": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-client-ui-settings": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-client-ui-slots": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-code-runtime": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-commands": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-credentials": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-deque": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-fs": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-host-webserver": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-invariants": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-llm": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-sandbox": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-scope": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-session": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-session-persistence": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-session-projection": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-settings": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-system-prompt": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-timeout": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-tools": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-typert-protocol": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-user-approval": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-util-crypto": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-util-values": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-web": "0.1.5-rc.1",
+    "@deepseek-ai/schemastery": "3.18.2",
+    "@testing-library/react": "^16.3.2",
+    "@types/node": "^22.20.0",
+    "@types/react": "~18.3.31",
+    "@types/react-dom": "~18.3.7",
+    "jsdom": "29.1.1",
+    "lightningcss": "^1.33.0",
+    "oxlint": "1.76.0",
+    "publint": "^0.3.24",
     "react": "18.3.1",
     "react-dom": "18.3.1",
+    "semver": "^7.8.5",
     "tsdown": "^0.22.14",
-    "typescript": "^5.8.2",
-    "vitest": "^3.0.7"
-  },
-  "scripts": {
-    "build": "tsdown",
-    "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.11"
   }
 }

@@ -3,21 +3,17 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
 import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { AntigravityAuthRpcClient } from '../rpc-contract.ts'
+import type { QuotaStatusView } from '../quota.ts'
+import type { AntigravityImageSettings } from '../image.ts'
+import type { RevokeState } from '../credential-coordinator.ts'
 import type {
-  AntigravityAuthRpcClient,
   AntigravityStatusView,
   CapabilityRowId,
-  LoginErrorCode
-} from './types.js'
-import type {
-  QuotaGroupInfo,
-  QuotaStatusView,
-  QuotaWindowInfo
-} from '../quota-service.js'
-import type { AntigravityImageSettings } from '../image-tool.js'
-import type { RevokeState } from '../credential-coordinator.js'
-import type { AntigravityAuthKey } from './locales.js'
-import { ensureSettingsStyles } from './styles.js'
+  LoginErrorCode,
+} from '../status.ts'
+import type { AntigravityAuthKey } from './locales.ts'
+import { ensureSettingsStyles } from './styles.ts'
 
 export interface AntigravityAuthSettingsProps {
   rpc: AntigravityAuthRpcClient
@@ -50,8 +46,8 @@ function useUnmountSignal(): () => AbortSignal {
 /** One navigable settings section; credentials remain Host-only and actions use typed RPC. */
 export function AntigravityAuthSettings({ rpc, t, subscribe, imageScope }: AntigravityAuthSettingsProps): ReactNode {
   const [status, setStatus] = useState<AntigravityStatusView | null>(null)
-    const imageSettings = useCapabilitySettings(imageScope)
-    const [quota, setQuota] = useState<QuotaStatusView | null>(null)
+  const imageSettings = useCapabilitySettings(imageScope)
+  const [quota, setQuota] = useState<QuotaStatusView | null>(null)
   const [quotaBusy, setQuotaBusy] = useState(false)
   const [quotaError, setQuotaError] = useState<string | null>(null)
   const [loadState, setLoadState] = useState<LoadState>('loading')
@@ -226,7 +222,7 @@ export function AntigravityAuthSettings({ rpc, t, subscribe, imageScope }: Antig
   const isConfigured = status?.login.configured === true
 
   return (
-    <section className="agy-settings" data-plugin="dsh-antigravity-auth" aria-labelledby="antigravity-auth-title">
+    <section className="agy-settings" data-plugin="dsh-tool-antigravity" aria-labelledby="antigravity-auth-title">
       <header className="agy-bundle-header">
         <div>
           <div className="agy-title-line">
@@ -289,7 +285,7 @@ export function AntigravityAuthSettings({ rpc, t, subscribe, imageScope }: Antig
               }}
             >
               <span className={quotaBusy || loadState === 'loading' ? 'agy-spin-icon' : ''}>
-                <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 21h5v-5"/></svg>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 21h5v-5"/></svg>
               </span>
               {quotaBusy || loadState === 'loading' ? t('queryingQuota') : t('refreshStatus')}
             </button>
@@ -308,7 +304,7 @@ export function AntigravityAuthSettings({ rpc, t, subscribe, imageScope }: Antig
           )}
         </article>
 
-        {/* Card 2: Image Creation */}
+        {/* Card 3: Image Creation */}
         <article className="agy-card">
           <div className="agy-card-header">
             <div className="agy-card-identity">
@@ -326,7 +322,7 @@ export function AntigravityAuthSettings({ rpc, t, subscribe, imageScope }: Antig
           </div>
         </article>
 
-        </div>
+      </div>
     </section>
   )
 }
@@ -397,25 +393,23 @@ function QuotaVisualDashboard({
   readonly onRefresh?: () => void
   readonly t: AntigravityAuthSettingsProps['t']
 }): ReactNode {
-  const isStale = quota?.stale === true
   return (
-    <div className={`agy-quota-section${isStale ? ' agy-quota-stale' : ''}`}>
+    <div className="agy-quota-section">
       {quota?.state === 'available' && quota.groups !== undefined && quota.groups.length > 0 ? (
         <div className="agy-quota-groups">
-          {quota.groups.map((group: QuotaGroupInfo) => {
+          {quota.groups.map(group => {
             const groupTitle = group.group === 'gemini' ? t('geminiGroupTitle') : t('claudeGptGroupTitle')
             const groupDesc = group.group === 'gemini' ? t('geminiGroupDesc') : t('claudeGptGroupDesc')
             return (
               <div key={group.group} className="agy-quota-group">
                 <div className="agy-quota-group-header">
                   <span className="agy-quota-group-title">{groupTitle}</span>
-                  {isStale ? <span className="agy-badge-stale">{t('staleQuota')}</span> : null}
                   <span className="agy-quota-group-desc">{groupDesc}</span>
                 </div>
                 <div className="agy-quota-buckets">
-                  {group.windows.map((window: QuotaWindowInfo) => {
+                  {group.windows.map(window => {
                     const windowName = window.window === '5h' ? t('window5hTitle') : t('windowWeeklyTitle')
-                    const pctFormatted = `${(window.remainingFraction * 100).toFixed(2)}%`
+                    const pctFormatted = (window.remainingFraction * 100).toFixed(2) + '%'
                     const pctRounded = Math.round(window.remainingFraction * 100)
                     const refreshStr = formatRefreshTime(window.resetTime, t('quotaDayUnit'))
                     const subtext = `${pctRounded}% ${t('remaining')} · ${t('refreshesIn').replace('{time}', refreshStr)}`

@@ -1,333 +1,184 @@
-import {
-  CLAUDE_DESCRIPTION_PROMPT,
-  CLAUDE_TOOL_SYSTEM_INSTRUCTION
-} from "@cortexkit/antigravity-auth-core";
-import { isRecord } from "./safe-text.js";
+/** Bounded, block-aligned replay metadata for Antigravity model turns. */
 
-export const ANTIGRAVITY_REPLAY_VERSION = 1;
-const MAX_SIGNATURE_LENGTH = 16384;
-const MAX_BLOCKS = 128;
+import type { ReplayEnvelope, ToolSchema } from '@deepseek-ai/dsh-llm'
+import type { Message } from '@deepseek-ai/dsh-llm'
 
-export type ModelFamily = "gemini" | "claude" | "gpt-oss" | "unknown";
+export const ANTIGRAVITY_REPLAY_VERSION = 1 as const
+const MAX_SIGNATURE_LENGTH = 16 * 1024
+const MAX_BLOCKS = 128
 
-export interface ReplayBlock {
-  kind: string;
-  signature?: string;
+export type ReplayBlockKind = 'text' | 'reasoning' | 'tool-call'
+
+export interface AntigravityReplayBlock {
+  readonly kind: ReplayBlockKind
+  readonly signature?: string
 }
 
-export interface ReplayState {
-  response: {
-    version: 1;
-    provider: "google-antigravity";
-    model: string;
-    family: ModelFamily;
-    finish?: string;
-  };
-  blocks: ReplayBlock[];
+export interface AntigravityReplayResponse {
+  readonly version: typeof ANTIGRAVITY_REPLAY_VERSION
+  readonly provider: 'google-antigravity'
+  readonly model: string
+  readonly family: 'gemini' | 'claude' | 'gpt-oss' | 'unknown'
+  readonly finish?: string
 }
 
-export function antigravityModelFamily(model: string): ModelFamily {
-  const value = model.toLowerCase();
-  if (value.includes("gemini")) return "gemini";
-  if (value.includes("claude")) return "claude";
-  if (value.includes("gpt-oss")) return "gpt-oss";
-  return "unknown";
+export interface AntigravityReplayState extends ReplayEnvelope {
+  readonly response: AntigravityReplayResponse
+  readonly blocks: readonly AntigravityReplayBlock[]
 }
 
-function safeSignature(value: unknown): string | undefined {
-  if (typeof value !== "string" || value.length === 0 || value.length > MAX_SIGNATURE_LENGTH) {
-    return undefined;
-  }
-  return value;
-}
-
-function safeFinish(value: unknown): string | undefined {
-  if (typeof value !== "string" || value.length === 0 || value.length > 128) {
-    return undefined;
-  }
-  const normalized = value.toUpperCase();
-  const allowed = ["STOP", "MAX_TOKENS", "LENGTH", "TOOL_CALLS", "FUNCTION_CALL", "CONTENT_FILTER"];
-  return allowed.includes(normalized) ? normalized : undefined;
-}
-
+/** Keep only provider-issued signatures and bounded response facts. */
 export function createReplayState(
   model: string,
-  family: ModelFamily,
+  family: AntigravityReplayResponse['family'],
   finish: string | undefined,
-  blocks: { kind: string; signature?: string }[]
-): ReplayState {
-  const boundedBlocks: ReplayBlock[] = blocks.slice(0, MAX_BLOCKS).map((block) => {
-    const signature = safeSignature(block.signature);
-    return {
-      kind: block.kind,
-      ...signature !== undefined ? { signature } : {}
-    };
-  });
-  const boundedFinish = safeFinish(finish);
+  blocks: readonly AntigravityReplayBlock[],
+): AntigravityReplayState {
+  const boundedBlocks: AntigravityReplayBlock[] = blocks.slice(0, MAX_BLOCKS).map(block => {
+    const signature = safeSignature(block.signature)
+    return { kind: block.kind, ...(signature === undefined ? {} : { signature }) }
+  })
+  const boundedFinish = safeFinish(finish)
   return {
     response: {
-      version: 1,
-      provider: "google-antigravity",
+      version: ANTIGRAVITY_REPLAY_VERSION,
+      provider: 'google-antigravity',
       model: model.slice(0, 256),
       family,
-      ...boundedFinish !== undefined ? { finish: boundedFinish } : {}
+      ...(boundedFinish === undefined ? {} : { finish: boundedFinish }),
     },
-    blocks: boundedBlocks
-  };
+    blocks: boundedBlocks,
+  }
 }
 
+/** Validate replay metadata before it can affect a later private request. */
 export function compatibleReplayState(
-  message: { role: string; content: unknown[]; source?: unknown; replayState?: unknown },
+  message: Message,
   provider: string,
   model: string,
-  blockKinds?: string[]
-): ReplayState | undefined {
-  if (provider !== "google-antigravity" || message.role !== "assistant") {
-    return undefined;
-  }
-  const provenance = isRecord(message.source) ? message.source : undefined;
-  if (
-    provenance !== undefined &&
-    provenance.kind === "model" &&
-    (provenance.provider !== provider || provenance.model !== model)
-  ) {
-    return undefined;
-  }
+  blockKinds?: readonly ReplayBlockKind[],
+): AntigravityReplayState | undefined {
+  if (provider !== 'google-antigravity' || message.role !== 'assistant') return undefined
+  const provenance = isRecord(message.source) ? (message.source as Record<string, unknown>) : undefined
+  if (provenance !== undefined && provenance.kind === 'model' && (provenance.provider !== provider || provenance.model !== model)) return undefined
   const value = isRecord(provenance?.replayState)
     ? provenance.replayState
-    : isRecord(message.replayState)
-      ? message.replayState
-      : undefined;
-
-  if (!isRecord(value) || !isRecord(value.response) || !Array.isArray(value.blocks)) {
-    return undefined;
-  }
-  const family = value.response.family as ModelFamily;
-  if (
-    value.response.version !== 1 ||
-    value.response.provider !== provider ||
-    value.response.model !== model ||
-    value.blocks.length > MAX_BLOCKS
-  ) {
-    return undefined;
-  }
-
-  const blocks: ReplayBlock[] = [];
+    : isRecord((message as unknown as Record<string, unknown>).replayState)
+      ? (message as unknown as Record<string, unknown>).replayState
+      : undefined
+  if (!isRecord(value) || !isRecord(value.response) || !Array.isArray(value.blocks)) return undefined
+  const family = value.response.family
+  if (value.response.version !== ANTIGRAVITY_REPLAY_VERSION
+    || value.response.provider !== provider
+    || value.response.model !== model
+    || !isFamily(family)
+    || value.blocks.length > MAX_BLOCKS) return undefined
+  const blocks: AntigravityReplayBlock[] = []
   for (const item of value.blocks) {
-    if (!isRecord(item) || typeof item.kind !== "string") continue;
-    const kind = item.kind;
-    const signature = typeof item.signature === "string" ? safeSignature(item.signature) : undefined;
-    blocks.push({
-      kind,
-      ...signature !== undefined ? { signature } : {}
-    });
+    if (!isRecord(item) || typeof item.kind !== 'string') continue
+    const kind = item.kind as ReplayBlockKind
+    const signature = typeof item.signature === 'string' && safeSignature(item.signature) !== undefined ? item.signature : undefined
+    blocks.push({ kind, ...(signature === undefined ? {} : { signature }) })
   }
-
-  if (
-    blockKinds !== undefined &&
-    (blocks.length !== blockKinds.length || blocks.some((b, i) => b.kind !== blockKinds[i]))
-  ) {
-    return undefined;
-  }
-
-  const finish = value.response.finish === undefined ? undefined : safeFinish(value.response.finish);
+  if (blockKinds !== undefined
+    && (blocks.length !== blockKinds.length || blocks.some((block, index) => block.kind !== blockKinds[index]))) return undefined
+  const finish = value.response.finish === undefined ? undefined : safeFinish(value.response.finish)
+  if (value.response.finish !== undefined && finish === undefined) return undefined
   return {
     response: {
-      version: 1,
-      provider: "google-antigravity",
+      version: ANTIGRAVITY_REPLAY_VERSION,
+      provider: 'google-antigravity',
       model,
       family,
-      ...finish !== undefined ? { finish } : {}
+      ...(finish === undefined ? {} : { finish }),
     },
-    blocks
-  };
+    blocks,
+  }
 }
 
-export function buildFunctionDeclarations(tools?: Array<{ name: string; description?: string; parameters?: unknown }>) {
-  if (!tools || tools.length === 0) return [];
-  return tools.slice(0, 64).map((tool) => ({
-    name: tool.name.slice(0, 128),
-    description: typeof tool.description === "string" ? tool.description.slice(0, 4096) : "",
-    parameters: sanitizeSchema(tool.parameters)
-  }));
+/** Return the block family without allowing a model alias to cross families. */
+export function antigravityModelFamily(model: string): AntigravityReplayResponse['family'] {
+  const value = model.toLowerCase()
+  if (value.includes('gemini')) return 'gemini'
+  if (value.includes('claude')) return 'claude'
+  if (value.includes('gpt-oss')) return 'gpt-oss'
+  return 'unknown'
+}
+
+/** Convert DSH schemas to the small function-declaration subset accepted privately. */
+export function sanitizeToolSchemas(tools: readonly ToolSchema[] | undefined): readonly Record<string, unknown>[] {
+  if (tools === undefined) return []
+  return tools.slice(0, 64).map(tool => ({
+    name: boundedName(tool.name),
+    description: boundedText(tool.description, 4096),
+    parameters: sanitizeSchema(tool.parameters),
+  }))
+}
+
+export function buildFunctionDeclarations(tools: readonly ToolSchema[] | undefined): readonly Record<string, unknown>[] {
+  return sanitizeToolSchemas(tools).map(tool => ({
+    name: tool.name,
+    description: tool.description,
+    parameters: tool.parameters,
+  }))
 }
 
 function sanitizeSchema(value: unknown, depth = 0): Record<string, unknown> {
-  if (depth > 8 || !isRecord(value)) {
-    return { type: "object", properties: {} };
-  }
-  const allowedTypes = ["object", "array", "string", "number", "integer", "boolean", "null"];
-  const type = typeof value.type === "string" && allowedTypes.includes(value.type) ? value.type : "object";
-  const output: Record<string, unknown> = { type };
-
-  if (typeof value.description === "string") {
-    output.description = value.description.slice(0, 1024);
-  }
-  if (Array.isArray(value.required)) {
-    output.required = value.required.filter((item): item is string => typeof item === "string").slice(0, 128);
-  }
-  if (Array.isArray(value.enum)) {
-    output.enum = value.enum.slice(0, 128).filter(
-      (item) => typeof item === "string" || typeof item === "number" || typeof item === "boolean" || item === null
-    );
-  }
-  if (type === "object" && isRecord(value.properties)) {
-    const properties: Record<string, unknown> = {};
+  if (depth > 8 || !isRecord(value)) return { type: 'object', properties: {} }
+  const type = typeof value.type === 'string' && ['object', 'array', 'string', 'number', 'integer', 'boolean', 'null'].includes(value.type)
+    ? value.type
+    : 'object'
+  const output: Record<string, unknown> = { type }
+  if (typeof value.description === 'string') output.description = boundedText(value.description, 1024)
+  if (Array.isArray(value.required)) output.required = value.required.filter(item => typeof item === 'string').slice(0, 128)
+  if (Array.isArray(value.enum)) output.enum = value.enum.slice(0, 128).filter(item => ['string', 'number', 'boolean', 'null'].includes(typeof item))
+  if (type === 'object' && isRecord(value.properties)) {
+    const properties: Record<string, unknown> = {}
     for (const [key, item] of Object.entries(value.properties).slice(0, 128)) {
-      if (key.length > 0 && !hasControl(key)) {
-        properties[key.slice(0, 128)] = sanitizeSchema(item, depth + 1);
-      }
+      if (!hasControl(key) && key.length > 0) properties[key.slice(0, 128)] = sanitizeSchema(item, depth + 1)
     }
-    output.properties = properties;
+    output.properties = properties
   }
-  if (type === "array") {
-    output.items = sanitizeSchema(value.items, depth + 1);
-  }
-  return output;
+  if (type === 'array') output.items = sanitizeSchema(value.items, depth + 1)
+  if (Array.isArray(value.oneOf)) output.oneOf = value.oneOf.slice(0, 8).map(item => sanitizeSchema(item, depth + 1))
+  return output
 }
 
-function hasControl(text: string): boolean {
-  for (let i = 0; i < text.length; i += 1) {
-    const code = text.charCodeAt(i);
-    if (code < 32 || code === 127) return true;
-  }
-  return false;
+function safeFinish(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 128) return undefined
+  const normalized = value.toUpperCase()
+  return ['STOP', 'MAX_TOKENS', 'LENGTH', 'TOOL_CALLS', 'FUNCTION_CALL', 'SAFETY', 'BLOCKLIST', 'ERROR'].includes(normalized) ? normalized : undefined
 }
 
-export function groupClaudeFunctionResponses(
-  contents: Array<{ role: string; parts: unknown[] }>,
-  model: string
-): Array<{ role: string; parts: unknown[] }> {
-  if (antigravityModelFamily(model) !== "claude") return contents;
-
-  const grouped: Array<{ role: string; parts: unknown[] }> = [];
-  let pendingResponses: unknown[] = [];
-
-  const flushResponses = () => {
-    if (pendingResponses.length === 0) return;
-    grouped.push({
-      role: "user",
-      parts: pendingResponses
-    });
-    pendingResponses = [];
-  };
-
-  for (const content of contents) {
-    const rawParts = Array.isArray(content.parts) ? content.parts : [];
-    const responseParts = rawParts.filter((part) => isRecord(part) && isRecord(part.functionResponse));
-
-    if (content.role === "user" && rawParts.length > 0 && responseParts.length === rawParts.length) {
-      pendingResponses.push(...responseParts);
-      continue;
-    }
-
-    flushResponses();
-    grouped.push(content);
+function safeSignature(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value.length === 0 || value.length > MAX_SIGNATURE_LENGTH) return undefined
+  for (const character of value) {
+    const code = character.charCodeAt(0)
+    if (code < 32 || code === 127) return undefined
   }
-  flushResponses();
-  return grouped;
+  return value
 }
 
-export function applyClaudeToolHardening(request: Record<string, unknown>): void {
-  if (!Array.isArray(request.tools) || request.tools.length === 0) return;
-
-  request.tools = request.tools.map((tool) => {
-    if (!isRecord(tool) || !Array.isArray(tool.functionDeclarations)) return tool;
-    return {
-      ...tool,
-      functionDeclarations: tool.functionDeclarations.map((declaration) =>
-        hardenClaudeToolDeclaration(declaration)
-      )
-    };
-  });
-
-  const instructionPart = { text: CLAUDE_TOOL_SYSTEM_INSTRUCTION };
-  const existing = request.systemInstruction;
-  if (isRecord(existing) && Array.isArray(existing.parts)) {
-    if (
-      existing.parts.some(
-        (part) => isRecord(part) && typeof part.text === "string" && part.text.includes("CRITICAL TOOL USAGE INSTRUCTIONS")
-      )
-    ) {
-      return;
-    }
-    request.systemInstruction = {
-      ...existing,
-      parts: [...existing.parts, instructionPart]
-    };
-  } else if (typeof existing === "string") {
-    request.systemInstruction = {
-      role: "user",
-      parts: [{ text: existing }, instructionPart]
-    };
-  } else {
-    request.systemInstruction = {
-      role: "user",
-      parts: [instructionPart]
-    };
-  }
+function boundedName(value: unknown): string {
+  return typeof value === 'string' && value.length > 0 && !hasControl(value) ? value.slice(0, 128) : 'unnamed_tool'
 }
 
-function hardenClaudeToolDeclaration(value: unknown): unknown {
-  if (!isRecord(value)) return value;
-  const description = typeof value.description === "string" ? value.description : "";
-  if (description.includes("STRICT PARAMETERS:")) return value;
-
-  const schema = isRecord(value.parameters) ? value.parameters : undefined;
-  const properties = schema !== undefined && isRecord(schema.properties) ? schema.properties : undefined;
-  if (properties === undefined || Object.keys(properties).length === 0) return value;
-
-  const required = new Set(
-    Array.isArray(schema?.required) ? schema.required.filter((item): item is string => typeof item === "string") : []
-  );
-  const parameters = Object.entries(properties).map(([name, property]) => {
-    const requiredHint = required.has(name) ? ", REQUIRED" : "";
-    return `${name} (${claudeToolTypeHint(property)}${requiredHint})`;
-  });
-
-  return {
-    ...value,
-    description: description + CLAUDE_DESCRIPTION_PROMPT.replace("{params}", parameters.join(", "))
-  };
+function boundedText(value: unknown, limit: number): string {
+  return typeof value === 'string' && !hasControl(value) ? value.slice(0, limit) : ''
 }
 
-function claudeToolTypeHint(value: unknown): string {
-  if (!isRecord(value)) return "unknown";
-  if (Array.isArray(value.enum)) {
-    return value.enum.length <= 5
-      ? `string ENUM[${value.enum.map((item) => JSON.stringify(item)).join(", ")}]`
-      : `string ENUM[${value.enum.length} options]`;
+function hasControl(value: string): boolean {
+  for (const character of value) {
+    const code = character.charCodeAt(0)
+    if (code < 32 || code === 127) return true
   }
-  const type = typeof value.type === "string" ? value.type : "unknown";
-  if (type === "array") {
-    if (!isRecord(value.items)) return "ARRAY";
-    const itemType = typeof value.items.type === "string" ? value.items.type : "unknown";
-    if (itemType !== "object") return `ARRAY_OF_${itemType.toUpperCase()}`;
-    if (!isRecord(value.items.properties)) return "ARRAY_OF_OBJECTS";
-    const nestedRequired = new Set(
-      Array.isArray(value.items.required)
-        ? value.items.required.filter((item): item is string => typeof item === "string")
-        : []
-    );
-    return `ARRAY_OF_OBJECTS[${Object.entries(value.items.properties)
-      .map(([name, property]) => {
-        return `${name}: ${isRecord(property) && typeof property.type === "string" ? property.type : "unknown"}${
-          nestedRequired.has(name) ? " REQUIRED" : ""
-        }`;
-      })
-      .join(", ")}]`;
-  }
-  if (type === "object" && isRecord(value.properties)) {
-    const nestedRequired = new Set(
-      Array.isArray(value.required) ? value.required.filter((item): item is string => typeof item === "string") : []
-    );
-    return `object{${Object.entries(value.properties)
-      .map(([name, property]) => {
-        return `${name}: ${isRecord(property) && typeof property.type === "string" ? property.type : "unknown"}${
-          nestedRequired.has(name) ? " REQUIRED" : ""
-        }`;
-      })
-      .join(", ")}}`;
-  }
-  return type;
+  return false
+}
+
+function isFamily(value: unknown): value is AntigravityReplayResponse['family'] {
+  return value === 'gemini' || value === 'claude' || value === 'gpt-oss' || value === 'unknown'
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

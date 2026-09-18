@@ -95,7 +95,6 @@ export const en = {
   quotaOffline: 'Quota is temporarily unavailable.',
   quotaProtocolDrift: 'Quota protocol drift was detected; raw provider data was discarded.',
   quotaFailed: 'Quota could not be loaded safely.',
-  staleQuota: '展示缓存配额（网络波动中…）',
   quotaLoading: 'Refreshing quota…',
   quotaRefresh: 'Refresh quota',
   quotaFiveHour: 'Five-hour window',
@@ -241,5 +240,4 @@ export const zh: Record<AntigravityAuthKey, string> = {
   remaining: '剩余',
   refreshesIn: '{time} 后刷新',
   quotaDayUnit: '天',
-  staleQuota: '展示缓存配额（网络波动中…）',
 }

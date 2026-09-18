@@ -1,21 +1,27 @@
 {
   "compilerOptions": {
-    "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "lib": ["ES2024", "DOM", "DOM.Iterable"],
-    "jsx": "react-jsx",
+    "target": "ES2024",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "baseUrl": ".",
+    "ignoreDeprecations": "6.0",
+    "paths": {
+      "dsh-antigravity-auth": ["src/index.ts"],
+      "dsh-antigravity-auth/*": ["src/*"]
+    },
     "strict": true,
-    "esModuleInterop": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "useDefineForClassFields": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
     "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "jsx": "react-jsx",
+    "allowImportingTsExtensions": true,
+    "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
-    "outDir": "./lib",
-    "rootDir": "./src",
-    "types": ["node"]
-  },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "lib", "**/*.spec.ts", "**/*.test.ts"]
+    "types": ["node", "vitest/globals"]
+  }
 }

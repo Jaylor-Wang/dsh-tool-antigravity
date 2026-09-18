@@ -1,138 +1,93 @@
-/**
- * Unified DeepSeek Harness Antigravity Capability Bundle.
- *
- * Core Features:
- * 1. Google Antigravity OAuth 2.0 PKCE authentication with local loopback callback.
- * 2. LLM Provider (`google-antigravity`) with Gemini, Claude, and GPT-OSS routing.
- * 3. High-performance connection pooling, SSE streaming, and quota management.
- */
+/** Host half of the private Antigravity bootstrap capability bundle. */
 
-import type { Context } from "@deepseek-ai/cordis";
-import type {} from "@deepseek-ai/dsh-client-connection";
-import type {} from "@deepseek-ai/dsh-host-webserver";
-import { AntigravityAdapter } from "./llm-adapter.js";
-import { AntigravityAuthService, createAntigravityAuthService } from "./auth-service.js";
-import { CredentialOperationError, ANTIGRAVITY_TOKEN_ENDPOINT, ANTIGRAVITY_REVOKE_ENDPOINT } from "./credential-coordinator.js";
-import { OAuthFlowError } from "./oauth-flow.js";
+import type { Context } from '@deepseek-ai/cordis'
+import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
+import type {} from '@deepseek-ai/dsh-client-connection'
+import type {} from '@deepseek-ai/dsh-commands'
+import type {} from '@deepseek-ai/dsh-host-webserver'
+import type {} from '@deepseek-ai/dsh-llm'
+import { createAntigravityAuthService } from './auth-service.ts'
+import { createAntigravityAuthCommand } from './auth-command.ts'
+import { AntigravityAdapter, ANTIGRAVITY_PROVIDER } from './llm-adapter.ts'
+import { defaultAuthStorePath } from './auth-store.ts'
+import { registerAccountRoutes } from './account-routes.ts'
+import { ANTIGRAVITY_AUTH_RPC_NAMESPACE, handleAntigravityAuthRpc } from './rpc.ts'
 import {
-  AGY_PROVIDER_USER_AGENT,
-  ANTIGRAVITY_WIRE_ORIGIN,
-  ANTIGRAVITY_WIRE_ORIGINS,
-  ANTIGRAVITY_WIRE_PATHS
-} from "./wire-identity.js";
-import {
-  ANTIGRAVITY_AUTH_RPC_CHANNEL,
-  ANTIGRAVITY_AUTH_RPC_NAMESPACE,
-  createAntigravityAuthRpcClient
-} from "./rpc-contract.js";
-import { registerAccountRoutes } from "./account-routes.js";
-import { createLoopbackRpcGuard } from "./loopback-rpc.js";
-import { ANTIGRAVITY_AUTH_RPC_ENDPOINTS, handleAntigravityAuthRpc } from "./rpc.js";
-import { openPlatformBrowser } from "./utils/process-opener.js";
+  commandAccountMode, createLoopbackRpcGuard, type LoopbackRpcMode,
+} from './loopback-rpc.ts'
+import { mountCapabilityLifecycle } from './capability-lifecycle.ts'
 
+export const name = 'antigravity-auth'
+export const inject = ['llm', 'attachments']
 
-export const ANTIGRAVITY_PLUGIN_ID = "dsh-tool-antigravity";
-export const ANTIGRAVITY_LEGACY_PLUGIN_ID = "dsh-antigravity-auth";
-export const ANTIGRAVITY_PROVIDER = "google-antigravity";
-export const ANTIGRAVITY_LLM_ROUTE = "google-antigravity";
-
-export const name = "antigravity-auth";
-export const inject = ["llm"] as const;
-export const provide = ["antigravityAuth"] as const;
-
+/** Mount the Host-only OAuth service and its guarded account RPC channel. */
 export function apply(ctx: Context): void {
-  const service = createAntigravityAuthService();
-  ctx.provide("antigravityAuth", service);
-
-  const attachments = ctx.get("attachments");
-
+  const service = createAntigravityAuthService({
+    storePath: defaultAuthStorePath(),
+    autoActivateGates: true,
+  })
+  // Account-control activation for the slash command. A terminal composition
+  // composes no public WebServer, so the command starts enabled (local-only
+  // dispatch); the connection inject below records the WebServer bind and
+  // blocks every account operation when the commands seam is exposed beyond
+  // loopback. The account RPC keeps its own ADR-0008 static loopback guard.
+  let accountMode: LoopbackRpcMode = 'enabled'
+  const runtime = ctx as unknown as {
+    llm?: {
+      listProviders?: () => readonly { id: string }[]
+      registerAdapter?: (providers: string[], adapter: AntigravityAdapter) => (() => void) & { replace?: (providers: string[]) => void }
+    }
+    attachments?: Pick<AttachmentStore, 'readImage'>
+  }
   const adapter = new AntigravityAdapter({
     auth: service,
-    attachments
-  });
-
-  // 1. Register LLM Adapter
-  const llm = ctx.get("llm") ?? (ctx as any).llm;
-  if (llm?.registerAdapter) {
-    const list = llm.listProviders?.() ?? [];
-    if (!list.some((p: any) => p.id === ANTIGRAVITY_PROVIDER)) {
-      llm.registerAdapter([ANTIGRAVITY_PROVIDER], adapter);
+    ...(runtime.attachments === undefined ? {} : { attachments: runtime.attachments }),
+  })
+  const contextWithProvide = ctx as Context & { provide?: (name: string, value: unknown) => () => Promise<void> | void }
+  const unprovide = contextWithProvide.provide?.('antigravityAuth', service) ?? (() => {})
+  ctx.inject(['connection'], (connectionCtx) => {
+    const webServer = connectionCtx.get('webServer')
+    accountMode = commandAccountMode(webServer)
+    const guard = createLoopbackRpcGuard(
+      webServer?.host,
+      (endpoint, payload, signal) => handleAntigravityAuthRpc(service, endpoint, payload, signal, adapter),
+    )
+    if (guard.mode === 'blocked') {
+      connectionCtx.logger.warn('antigravity-auth: account RPC is disabled because the WebServer is not loopback-bound')
     }
-  }
-
-  // 2. Register Slash Command (/antigravity-auth)
-  const commands = ctx.get("commands");
-  if (commands?.register) {
-    commands.register({
-      name: "antigravity-auth",
-      description: "Manage Antigravity authentication, status, and quota",
-      handler: async ({ rawInput }: { rawInput: string }) => {
-        const op = rawInput.trim().toLowerCase();
-        if (!op || op === "status") {
-          const status = await service.status();
-          return {
-            kind: "success",
-            text: `Antigravity Auth Status: phase=${status.login.phase}, configured=${status.login.configured}`
-          };
-        }
-        if (op === "login") {
-          const result = await service.startLogin();
-          if (result.authorizationUrl) {
-            void openPlatformBrowser(result.authorizationUrl);
-            return {
-              kind: "success",
-              text: "Opened browser for Google Antigravity sign-in. Waiting for callback..."
-            };
-          }
-          return { kind: "error", text: "Failed to initiate Antigravity login." };
-        }
-        if (op === "cancel") {
-          const res = await service.cancelLogin();
-          return { kind: "success", text: `Cancelled login: phase=${res.phase}` };
-        }
-        if (op === "logout") {
-          await service.logout();
-          return { kind: "success", text: "Logged out from Antigravity." };
-        }
-        return {
-          kind: "error",
-          text: `Unknown command "${op}". Available: status, login, cancel, logout`
-        };
+    return registerAccountRoutes(connectionCtx.connection, ANTIGRAVITY_AUTH_RPC_NAMESPACE, ['status', 'models', 'usage', 'acknowledge-risk', 'login', 'cancel', 'cancel-login', 'logout', 'revoke'], guard.handler)
+  })
+  mountCapabilityLifecycle({
+    ctx,
+    auth: service,
+    id: 'auth-llm',
+    enabled: () => runtime.llm?.registerAdapter !== undefined,
+    register: () => {
+      if (runtime.llm?.registerAdapter === undefined) return undefined
+      if (runtime.llm.listProviders?.().some(provider => provider.id === ANTIGRAVITY_PROVIDER)) return undefined
+      const dispose = runtime.llm.registerAdapter([ANTIGRAVITY_PROVIDER], adapter)
+      return () => {
+        try { dispose() } finally { adapter.invalidateModelCatalog() }
       }
-    });
-  }
-
-  // 3. Register Loopback RPC Routes once Connection is available.
-  ctx.inject(["connection"], (connectionCtx) => {
-    const webServer = connectionCtx.get("webServer") as { host?: string } | undefined;
-    const guard = createLoopbackRpcGuard(webServer?.host, (endpoint, payload, signal) =>
-      handleAntigravityAuthRpc(service, endpoint, payload, signal)
-    );
-    if (guard.mode === "blocked") {
-      connectionCtx.logger.warn("antigravity-auth: account RPC is disabled because the WebServer is not loopback-bound");
-    }
-    return registerAccountRoutes(
-      connectionCtx.connection,
-      ANTIGRAVITY_AUTH_RPC_NAMESPACE,
-      ANTIGRAVITY_AUTH_RPC_ENDPOINTS,
-      guard.handler
-    );
-  });
+    },
+    ownsAuth: true,
+    cleanup: unprovide,
+    label: 'antigravity-auth: OAuth and LLM operations',
+  })
+  ctx.inject(['commands'], commandCtx => commandCtx.commands.register(createAntigravityAuthCommand(service, () => accountMode)))
 }
 
-export {
-  AntigravityAdapter,
-  AntigravityAuthService,
-  createAntigravityAuthService,
-  CredentialOperationError,
-  OAuthFlowError,
-  AGY_PROVIDER_USER_AGENT,
-  ANTIGRAVITY_TOKEN_ENDPOINT,
-  ANTIGRAVITY_REVOKE_ENDPOINT,
-  ANTIGRAVITY_WIRE_ORIGIN,
-  ANTIGRAVITY_WIRE_ORIGINS,
-  ANTIGRAVITY_WIRE_PATHS,
-  ANTIGRAVITY_AUTH_RPC_CHANNEL,
-  ANTIGRAVITY_AUTH_RPC_NAMESPACE,
-  createAntigravityAuthRpcClient
-};
+export * from './auth-service.ts'
+export * from './credential-coordinator.ts'
+export * from './rpc-contract.ts'
+export * from './status.ts'
+export * from './project-context.ts'
+export * from './wire-identity.ts'
+export * from './llm-adapter.ts'
+export * from './private-transport.ts'
+export * from './replay.ts'
+export * from './quota.ts'
+export * from './media-admission.ts'
+export * from './model-catalog.ts'
+export * from './capability-gates.ts'
+export * from './live-gates.ts'

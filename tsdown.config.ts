@@ -1,33 +1,38 @@
-import { defineConfig } from 'tsdown';
+import { defineConfig } from 'tsdown'
+import { clientBundle } from './build/client-bundle.ts'
 
+const packageName = 'dsh-tool-antigravity'
+
+/** Build the Host rows, browser entry, and public companion modules. */
 export default defineConfig([
   {
-    entry: {
-      index: 'src/index.ts',
-      image: 'src/image.ts',
-      'rpc-contract': 'src/rpc-contract.ts',
-      'project-context': 'src/project-context.ts',
-      'wire-identity': 'src/wire-identity.ts',
-      invariant: 'src/invariant.ts',
-      'llm-adapter': 'src/llm-adapter.ts',
-      'private-transport': 'src/private-transport.ts',
-      replay: 'src/replay.ts',
-      quota: 'src/quota.ts',
-      'media-admission': 'src/media-admission.ts',
-    },
+    name: packageName,
+    entry: [
+      'src/index.ts',
+      'src/image.ts',
+      'src/invariant.ts',
+      'src/rpc-contract.ts',
+      'src/project-context.ts',
+      'src/wire-identity.ts',
+      'src/llm-adapter.ts',
+      'src/private-transport.ts',
+      'src/replay.ts',
+      'src/quota.ts',
+      'src/media-admission.ts',
+      'src/live-gates.ts',
+      'src/live-gate-runner.ts',
+    ],
+    outDir: 'lib',
     format: ['esm'],
-    outDir: 'lib',
+    platform: 'node',
+    target: 'es2024',
+    tsconfig: 'tsconfig.host.json',
+    fixedExtension: false,
+    dts: false,
     clean: false,
-    dts: true,
-  },
-  {
-    entry: {
-      client: 'src/client/index.ts',
+    deps: {
+      neverBundle: [/^@deepseek-ai\//, /^@cortexkit\//],
     },
-    format: ['cjs'],
-    outDir: 'lib',
-    clean: false,
-    banner: 'var __defLoader__ = (typeof window !== "undefined" && window.__ModuleLoader__) ? window.__ModuleLoader__.load.bind(window.__ModuleLoader__) : function(m) { Object.assign(module.exports, m.factory(require)); };\n__defLoader__({ id: "dsh-tool-antigravity", factory: function(require) {\nvar module = { exports: {} };\nvar exports = module.exports;\n',
-    footer: '\nreturn module.exports;\n}});\n',
   },
-]);
+  clientBundle(packageName),
+])
