@@ -2,17 +2,28 @@
 
 English | [中文](README.zh.md)
 
-[![npm version](https://img.shields.io/npm/v/dsh-tool-antigravity.svg)](https://www.npmjs.com/package/dsh-tool-antigravity)
+[![npm version](https://img.shields.io/npm/v/dsh-tool-antigravity.svg?color=blue)](https://www.npmjs.com/package/dsh-tool-antigravity)
 [![license](https://img.shields.io/github/license/Jaylor-Wang/dsh-tool-antigravity.svg)](LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/Jaylor-Wang/dsh-tool-antigravity.svg)](https://github.com/Jaylor-Wang/dsh-tool-antigravity/releases)
+[![Tests](https://img.shields.io/badge/tests-28%20suites%20%7C%20268%20passed-brightgreen.svg)](tests/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-Strict%20Types-blue.svg)](tsconfig.json)
 
-Streamlined, high-performance Antigravity capability bundle plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH).
+High-performance, streamlined Antigravity capability bundle plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH).
 
-Provides private OAuth 2.0 PKCE authentication, multi-model routing (`google-antigravity`), session-persistent image generation/editing, and a real-time quota dashboard with graceful caching.
+Provides private Google OAuth 2.0 PKCE authentication, multi-model LLM routing (`google-antigravity`), session-persistent image generation and editing (`generate_image`, `list_images`), and an interactive Web settings panel with live quota visualization.
 
 ---
 
-## Features & Optimizations
+## Highlights in v0.2.0
+
+- **Streamlined Two-Pillar Scope**: Completely eliminated search and video modules for minimal footprint, memory safety, and zero bloat.
+- **Windows Browser Opener Fix**: Resolved `cmd.exe` ampersand truncation (`&response_type=code`) using `windowsVerbatimArguments: true`, ensuring smooth 1-click Google OAuth flow on Windows.
+- **Robust Host RPC Integration**: Lifecycle-managed loopback Fetch handler for `/api/dsh-tool-antigravity/*` endpoints with fail-closed security.
+- **100% Verified Quality**: 28 test suites, 268 automated tests covering transports, lifecycle, gates, quota, and client UI with strict TypeScript checks.
+
+---
+
+## Features
 
 ### 1. High-Performance Core Architecture
 - **TLS Connection Pooling & Session Resumption**: Built-in HTTP/1.1 Keep-Alive socket pool and TLS session resumption against Google endpoints, eliminating repeated TLS handshake roundtrips and significantly reducing Time-To-First-Token (TTFT).
@@ -27,6 +38,7 @@ Provides private OAuth 2.0 PKCE authentication, multi-model routing (`google-ant
 | :--- | :--- | :--- | :--- |
 | `antigravity-gemini-3.8-flash` | Gemini 3.8 Flash | Text, Vision, Tools | Low / Medium / High |
 | `antigravity-gemini-3.7-flash` | Gemini 3.7 Flash | Text, Vision, Tools | Low / Medium / High |
+| `antigravity-gemini-3.6-flash` | Gemini 3.6 Flash | Text, Vision, Tools | Default |
 | `antigravity-gemini-3.1-pro` | Gemini 3.1 Pro | Text, Vision, Tools | Low / High |
 | `claude-sonnet-4-6-thinking` | Claude Sonnet 4.6 | Text, Vision, Tools | Dynamic Reasoning |
 | `claude-opus-4-6-thinking` | Claude Opus 4.6 | Text, Vision, Tools | Dynamic Reasoning |
@@ -35,23 +47,29 @@ Provides private OAuth 2.0 PKCE authentication, multi-model routing (`google-ant
 ### 3. Image Generation & Multi-Turn Editing
 - **`generate_image`**: Prompt-based image creation and iterative image-to-image editing using session references.
 - **`list_images`**: Inspect and retrieve generated image attachments within the current session.
-- Fully integrated with DSH `AttachmentStore` without polluting chat context with raw base64 payloads.
+- Fully integrated with DSH `AttachmentStore` and `FileSystem` with TOCTOU path escape protection without polluting chat context with raw base64 payloads.
 
 ---
 
 ## Installation
 
-Inside your DSH profile or root project:
-
+### Via DSH Plugin CLI (Recommended)
 ```sh
+# Add directly to your active DSH web profile
+dsh plugin --profile web add dsh-tool-antigravity
+```
+
+### Via npm / pnpm
+```sh
+# Using npm
 npm install dsh-tool-antigravity
-# or using pnpm
+
+# Using pnpm
 pnpm add dsh-tool-antigravity
 ```
 
 ### Cordis Plugin Configuration
-
-Add the plugin to your `cordis.patch.yml` or DSH config file:
+Add the plugin entries to your `cordis.patch.yml` or DSH config file:
 
 ```yaml
 - id: antigravity-auth
@@ -77,6 +95,7 @@ Manage authentication directly from the DSH terminal / chat prompt:
 Once loaded in the DSH Web client:
 - **Antigravity Auth Settings Card**: View live login status, account identifier, and toggle capabilities.
 - **Quota Visualizer**: Real-time remaining quota percentages and countdowns for 5-hour and weekly reset windows.
+- **Image Generation Card**: Configure default image models and batch size.
 
 ---
 
