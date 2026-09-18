@@ -48,6 +48,34 @@ describe("Build Artifacts Verification", () => {
     expect(typeof client.AntigravityAuthSettings).toBe("function");
   });
 
+  it("verifies client bundle registers with window.__ModuleLoader__ in browser environment", () => {
+    const fs = createRequire(import.meta.url)("fs");
+    const clientPath = path.resolve(__dirname, "../lib/client.cjs");
+    const code = fs.readFileSync(clientPath, "utf-8");
+
+    let registration: any = null;
+    const mockWindow = {
+      __ModuleLoader__: {
+        load: (reg: any) => {
+          registration = reg;
+        }
+      }
+    };
+
+    // Evaluate script with window in scope
+    const runInBrowserContext = new Function("window", "require", code);
+    const mockRequire = createRequire(import.meta.url);
+    runInBrowserContext(mockWindow, mockRequire);
+
+    expect(registration).not.toBeNull();
+    expect(registration.id).toBe("dsh-tool-antigravity");
+    expect(typeof registration.factory).toBe("function");
+
+    const exports = registration.factory(mockRequire);
+    expect(typeof exports.apply).toBe("function");
+    expect(typeof exports.AntigravityAuthSettings).toBe("function");
+  });
+
   it("verifies plugins can be loaded into Cordis Context without injection errors", async () => {
     const { Context } = await import("@deepseek-ai/cordis");
     const main = await import("../lib/index.mjs");
