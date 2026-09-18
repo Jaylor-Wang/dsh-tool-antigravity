@@ -1,5 +1,11 @@
 # dsh-tool-antigravity
 
+[English](README.md) | 中文
+
+[![npm version](https://img.shields.io/npm/v/dsh-tool-antigravity.svg)](https://www.npmjs.com/package/dsh-tool-antigravity)
+[![license](https://img.shields.io/github/license/Jaylor-Wang/dsh-tool-antigravity.svg)](LICENSE)
+[![GitHub release](https://img.shields.io/github/v/release/Jaylor-Wang/dsh-tool-antigravity.svg)](https://github.com/Jaylor-Wang/dsh-tool-antigravity/releases)
+
 DeepSeek Harness (DSH) 高性能 Antigravity 能力包插件。
 
 专注于两大核心功能：

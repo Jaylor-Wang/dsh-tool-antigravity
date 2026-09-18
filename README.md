@@ -1,5 +1,11 @@
 # dsh-tool-antigravity
 
+English | [中文](README.zh.md)
+
+[![npm version](https://img.shields.io/npm/v/dsh-tool-antigravity.svg)](https://www.npmjs.com/package/dsh-tool-antigravity)
+[![license](https://img.shields.io/github/license/Jaylor-Wang/dsh-tool-antigravity.svg)](LICENSE)
+[![GitHub release](https://img.shields.io/github/v/release/Jaylor-Wang/dsh-tool-antigravity.svg)](https://github.com/Jaylor-Wang/dsh-tool-antigravity/releases)
+
 Streamlined, high-performance Antigravity capability bundle plugin for DeepSeek Harness (DSH).
 
 Focuses exclusively on two core features:
