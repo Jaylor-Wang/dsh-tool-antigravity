@@ -122,8 +122,40 @@ export function apply(ctx: Context): void {
         methods: ["POST"],
         requestBody: "buffered",
         fetch: async ({ request }: { request: Request }) => {
+          let rpcId: string | undefined;
+          let body: Record<string, unknown> = {};
+          try {
+            const raw = (await request.json().catch(() => ({}))) as unknown;
+            if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+              body = raw as Record<string, unknown>;
+              if ("rpcId" in raw && typeof raw.rpcId === "string") {
+                rpcId = raw.rpcId;
+              }
+            }
+          } catch {
+            // ignore
+          }
+
+          const makeResponse = (
+            result:
+              | { ok: true; value: unknown }
+              | { ok: false; error: { code: string; message: string; details?: Record<string, unknown> } }
+          ) => {
+            if (rpcId !== undefined) {
+              return Response.json({
+                type: "server-response",
+                rpcId,
+                result: {
+                  ...result,
+                  ...(result.ok === false ? { error: { ...result.error, details: result.error.details ?? {} } } : {})
+                }
+              });
+            }
+            return Response.json(result);
+          };
+
           if (!isLoopback) {
-            return Response.json({
+            return makeResponse({
               ok: false,
               error: {
                 code: "loopback-required",
@@ -133,53 +165,63 @@ export function apply(ctx: Context): void {
             });
           }
 
+          const rawPayload = body.payload;
+          const payload =
+            rawPayload && typeof rawPayload === "object" && !Array.isArray(rawPayload)
+              ? (rawPayload as Record<string, unknown>)
+              : body;
+
           try {
-            const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
             switch (endpoint) {
               case "status": {
                 const status = await service.status();
-                return Response.json({ ok: true, value: { status } });
+                return makeResponse({ ok: true, value: { status } });
               }
               case "usage": {
-                const force = Boolean(body.force);
+                const force = Boolean(payload.force);
                 const usage = await service.usage(undefined, force);
-                return Response.json({ ok: true, value: usage });
+                return makeResponse({ ok: true, value: usage });
               }
               case "acknowledge-risk": {
                 const ack = service.acknowledgeRisk();
-                return Response.json({ ok: true, value: ack });
+                return makeResponse({ ok: true, value: ack });
               }
               case "login": {
                 const start = await service.startLogin();
                 if (start.authorizationUrl) {
                   void openPlatformBrowser(start.authorizationUrl);
                 }
-                return Response.json({ ok: true, value: start });
+                return makeResponse({ ok: true, value: start });
               }
               case "cancel": {
                 const cancel = await service.cancelLogin();
-                return Response.json({ ok: true, value: cancel });
+                return makeResponse({ ok: true, value: cancel });
               }
               case "logout": {
                 const logout = await service.logout();
-                return Response.json({ ok: true, value: logout });
+                return makeResponse({ ok: true, value: logout });
               }
               case "revoke": {
                 const revoke = await service.revoke(true);
-                return Response.json({ ok: true, value: revoke });
+                return makeResponse({ ok: true, value: revoke });
               }
               default:
-                return Response.json({
+                return makeResponse({
                   ok: false,
                   error: { code: "not-found", message: "Endpoint not found", details: {} }
                 });
             }
-          } catch (error: any) {
-            return Response.json({
+          } catch (error: unknown) {
+            const code =
+              error && typeof error === "object" && "code" in error && typeof error.code === "string"
+                ? error.code
+                : "internal";
+            const message = error instanceof Error ? error.message : "Internal error";
+            return makeResponse({
               ok: false,
               error: {
-                code: error?.code ?? "internal",
-                message: error?.message ?? "Internal error",
+                code,
+                message,
                 details: {}
               }
             });

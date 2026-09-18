@@ -13,6 +13,7 @@ import {
 import { TlsSocketPool } from "../src/socket-pool.js";
 import { createAuthStore, AUTH_STORE_LOCK_NAME } from "../src/credential-store.js";
 import { normalizeProjectId } from "../src/project-context.js";
+import { createAntigravityAuthRpcClient, type AntigravityAuthConnectionRpc } from "../src/rpc-contract.js";
 
 describe("Wire Identity", () => {
   it("generates exact audited provider headers with truthful DSH attribution", () => {
@@ -139,5 +140,43 @@ describe("Project Discovery Normalization", () => {
     expect(normalizeProjectId("123-invalid-start-with-number")).toBeUndefined();
     expect(normalizeProjectId("")).toBeUndefined();
     expect(normalizeProjectId(null)).toBeUndefined();
+  });
+});
+
+describe("RPC Contract & Client Connection Protocol", () => {
+  it("adapts connection.rpc to AntigravityAuthRpcClient and calls status endpoint", async () => {
+    const recordedCalls: Array<{ channel: string; endpoint: string; payload: unknown }> = [];
+    const mockConnectionRpc: AntigravityAuthConnectionRpc = {
+      call: async (channel, endpoint, payload) => {
+        recordedCalls.push({ channel, endpoint, payload });
+        if (endpoint === "antigravity-auth/status") {
+          return {
+            ok: true,
+            value: {
+              status: {
+                riskAcknowledged: true,
+                login: { phase: "idle", configured: false, projectAvailable: false },
+                credential: { configured: false },
+                capabilities: []
+              }
+            }
+          };
+        }
+        return { ok: false, error: { code: "not-found", message: "Not found", details: {} } };
+      }
+    };
+
+    const client = createAntigravityAuthRpcClient(mockConnectionRpc);
+    expect(typeof client.status).toBe("function");
+    expect(typeof client.login).toBe("function");
+
+    const result = await client.status();
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.status.login.phase).toBe("idle");
+    }
+    expect(recordedCalls).toHaveLength(1);
+    expect(recordedCalls[0]?.channel).toBe("/api");
+    expect(recordedCalls[0]?.endpoint).toBe("antigravity-auth/status");
   });
 });

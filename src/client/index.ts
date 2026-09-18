@@ -10,6 +10,7 @@ import { AntigravityAuthSettings } from "./AntigravityAuthSettings.js";
 import { en, zh, type AntigravityAuthKey } from "./locales.js";
 import type { AntigravityAuthSettingsProps } from "./AntigravityAuthSettings.js";
 import type { AntigravityAuthRpcClient } from "./types.js";
+import { createAntigravityAuthRpcClient, type AntigravityAuthConnectionRpc } from "../rpc-contract.js";
 import type { AntigravityImageSettings } from "../image-tool.js";
 
 const NS = "settings.antigravityAuth";
@@ -35,7 +36,7 @@ export function apply(ctx: ClientContext): void {
 
   const connection = ctx.get("connection") as unknown as ConnectionHandle;
   if (!connection.isLoopback) return;
-  const rpc = connection.rpc as unknown as AntigravityAuthRpcClient;
+  const rpc = createAntigravityAuthRpcClient(connection.rpc as unknown as AntigravityAuthConnectionRpc);
   const t = ctx.locale.bind(NS) as AntigravityAuthSettingsProps["t"];
   const settingsScope = (
     ctx as ClientContext & {
