@@ -1,13 +1,22 @@
 {
   "name": "dsh-tool-antigravity",
-  "version": "0.1.0",
-  "description": "High-performance Antigravity OAuth LLM routing and image generation capability bundle for DeepSeek Harness",
+  "version": "0.2.0",
+  "description": "High-performance, streamlined Antigravity OAuth LLM routing and image generation capability bundle for DeepSeek Harness",
   "type": "module",
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
   },
   "publishConfig": {
     "access": "public"
+  },
+  "author": "Jaylor-Wang",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Jaylor-Wang/dsh-tool-antigravity.git"
+  },
+  "homepage": "https://github.com/Jaylor-Wang/dsh-tool-antigravity#readme",
+  "bugs": {
+    "url": "https://github.com/Jaylor-Wang/dsh-tool-antigravity/issues"
   },
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
@@ -129,7 +138,6 @@
     "@deepseek-ai/dsh-session": "^0.1.5-rc.1",
     "@deepseek-ai/dsh-settings": "^0.1.5-rc.1",
     "@deepseek-ai/dsh-tools": "^0.1.5-rc.1",
-    "@deepseek-ai/dsh-web": "^0.1.5-rc.1",
     "@deepseek-ai/schemastery": "^3.18.2",
     "react": "^18.2.0"
   },
@@ -168,7 +176,6 @@
     "@deepseek-ai/dsh-user-approval": "0.1.5-rc.1",
     "@deepseek-ai/dsh-util-crypto": "0.1.5-rc.1",
     "@deepseek-ai/dsh-util-values": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-web": "0.1.5-rc.1",
     "@deepseek-ai/schemastery": "3.18.2",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^22.20.0",
