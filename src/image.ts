@@ -47,22 +47,25 @@ export function apply(
     n: 1
   }
 ): void {
-  if (!ctx?.tools || !ctx?.attachments || !ctx?.fs) return;
+  const toolsRuntime = ctx.get("tools") ?? ctx.tools;
+  const attachments = ctx.get("attachments") ?? ctx.attachments;
+  const fs = ctx.get("fs") ?? ctx.fs;
+  if (!toolsRuntime || !attachments || !fs) return;
 
-  const auth = ctx.antigravityAuth ?? {
+  const auth = (ctx.get("antigravityAuth") as ImagePluginContext["antigravityAuth"]) ?? {
     credential: async () => undefined
   };
 
   const tools = createAntigravityImageTools({
     auth,
-    attachments: ctx.attachments,
-    fs: ctx.fs,
+    attachments,
+    fs,
     settings: () => config
   });
 
   if (config.enabled) {
     for (const tool of tools) {
-      ctx.tools.register(tool);
+      toolsRuntime.register(tool);
     }
   }
 }

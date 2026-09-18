@@ -32,27 +32,32 @@ export const ANTIGRAVITY_LLM_ROUTE = "google-antigravity";
 
 export const name = "antigravity-auth";
 export const inject = ["llm"] as const;
+export const provide = ["antigravityAuth"] as const;
 
 export function apply(ctx: Context): void {
-  const c = ctx as any;
   const service = createAntigravityAuthService();
+  ctx.provide("antigravityAuth", service);
+
+  const attachments = ctx.get("attachments");
 
   const adapter = new AntigravityAdapter({
     auth: service,
-    attachments: c.attachments
+    attachments
   });
 
   // 1. Register LLM Adapter
-  if (c.llm?.registerAdapter) {
-    const list = c.llm.listProviders?.() ?? [];
+  const llm = ctx.get("llm") ?? (ctx as any).llm;
+  if (llm?.registerAdapter) {
+    const list = llm.listProviders?.() ?? [];
     if (!list.some((p: any) => p.id === ANTIGRAVITY_PROVIDER)) {
-      c.llm.registerAdapter([ANTIGRAVITY_PROVIDER], adapter);
+      llm.registerAdapter([ANTIGRAVITY_PROVIDER], adapter);
     }
   }
 
   // 2. Register Slash Command (/antigravity-auth)
-  if (c.commands?.register) {
-    c.commands.register({
+  const commands = ctx.get("commands");
+  if (commands?.register) {
+    commands.register({
       name: "antigravity-auth",
       description: "Manage Antigravity authentication, status, and quota",
       handler: async ({ rawInput }: { rawInput: string }) => {
@@ -92,12 +97,14 @@ export function apply(ctx: Context): void {
   }
 
   // 3. Register Loopback RPC Routes on connection if present
-  if (c.connection?.fetch?.register) {
+  const connection = ctx.get("connection");
+  const webServer = ctx.get("webServer");
+  if (connection?.fetch?.register) {
     const isLoopback =
-      !c.webServer?.host ||
-      c.webServer.host === "127.0.0.1" ||
-      c.webServer.host === "localhost" ||
-      c.webServer.host === "::1";
+      !webServer?.host ||
+      webServer.host === "127.0.0.1" ||
+      webServer.host === "localhost" ||
+      webServer.host === "::1";
     const endpoints = [
       "status",
       "models",
@@ -110,7 +117,7 @@ export function apply(ctx: Context): void {
     ];
 
     for (const endpoint of endpoints) {
-      c.connection.fetch.register({
+      connection.fetch.register({
         path: `/api/${ANTIGRAVITY_AUTH_RPC_NAMESPACE}/${endpoint}`,
         methods: ["POST"],
         requestBody: "buffered",

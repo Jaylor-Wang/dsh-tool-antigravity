@@ -47,4 +47,39 @@ describe("Build Artifacts Verification", () => {
     expect(typeof client.apply).toBe("function");
     expect(typeof client.AntigravityAuthSettings).toBe("function");
   });
+
+  it("verifies plugins can be loaded into Cordis Context without injection errors", async () => {
+    const { Context } = await import("@deepseek-ai/cordis");
+    const main = await import("../lib/index.mjs");
+    const image = await import("../lib/image.mjs");
+
+    const ctx = new Context();
+    ctx.provide("llm", {
+      listProviders: () => [],
+      registerAdapter: () => {}
+    });
+    ctx.provide("tools", {
+      register: () => {}
+    });
+    ctx.provide("attachments", {
+      imageLimits: {},
+      validateImage: async () => {},
+      saveImage: async () => {},
+      readImage: async () => {}
+    });
+    ctx.provide("fs", {
+      resolve: async () => ({}),
+      contains: () => true,
+      readBytes: async () => new Uint8Array(),
+      lstat: async () => ({}),
+      stat: async () => ({})
+    });
+
+    await ctx.plugin(main);
+    await ctx.plugin(image);
+
+    expect(ctx.get("antigravityAuth")).toBeDefined();
+    expect(typeof ctx.get("antigravityAuth").status).toBe("function");
+    expect(typeof ctx.get("antigravityAuth").credential).toBe("function");
+  });
 });
