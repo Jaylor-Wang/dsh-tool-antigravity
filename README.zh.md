@@ -5,12 +5,22 @@
 [![npm version](https://img.shields.io/npm/v/dsh-tool-antigravity.svg?color=blue)](https://www.npmjs.com/package/dsh-tool-antigravity)
 [![license](https://img.shields.io/github/license/Jaylor-Wang/dsh-tool-antigravity.svg)](LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/Jaylor-Wang/dsh-tool-antigravity.svg)](https://github.com/Jaylor-Wang/dsh-tool-antigravity/releases)
-[![Tests](https://img.shields.io/badge/tests-28%20suites%20%7C%20268%20passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-28%20suites%20%7C%20271%20passed-brightgreen.svg)](tests/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Strict%20Types-blue.svg)](tsconfig.json)
 
 为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) 打造的高性能 Antigravity 核心能力包插件。
 
 提供私有 Google OAuth 2.0 PKCE 认证闭环、全系多模型路由服务（`google-antigravity`）、会话持久化图片生成与多轮编辑工具（`generate_image` / `list_images`），以及具备 SWR 容错缓存与微光动效的实时 Web 设置面板与配额看板。
+
+---
+
+## v0.2.1 版本重要更新 (稳定性与连接保活增强)
+
+- **前置幂等断线自愈**：在流式生成首字节前遇到瞬时网络异常（如连接重置、超时、`502/503/504` 网关错误）时自动平滑重试 1 次（500ms 退避），杜绝因瞬态链路抖动导致整轮会话中断，严格保持首字节后的 fail-closed 原则避免二次计费。
+- **TCP Socket Keep-Alive & NoDelay**：为底层原生 HTTP/1.1 Socket 注入 15 秒心跳保活与低延迟配置，彻底消除中间 NAT、防火墙以及国内常见本地代理（Clash / Surge / V2Ray 等 127.0.0.1）在模型思考停顿间隙静默掐断长连接的问题。
+- **流式超时阈值放宽**：将流空闲超时（Idle Timeout）提升至 120 秒，总超时（Total Timeout）放宽至 600 秒（10 分钟），充分容纳 Gemini 3.8 Flash、Gemini 2.5 Pro 及 Claude 系列模型的深度推理阶段。
+- **凭据存储统一**：凭据默认持久化路径统归 `C:\Users\<user>\AppData\Local\dsh-tool-antigravity\auth.json`，解决双目录残留与冲突隐患。
+- **代理环境自适应**：支持无协议前缀的代理地址自动规范化补全，支持 `HTTP_PROXY` 环境变量自动降级兜底，异常透传底层系统错误详情。
 
 ---
 

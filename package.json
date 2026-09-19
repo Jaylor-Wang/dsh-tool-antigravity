@@ -1,6 +1,6 @@
 {
   "name": "dsh-tool-antigravity",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "High-performance, streamlined Antigravity OAuth LLM routing and image generation capability bundle for DeepSeek Harness",
   "type": "module",
   "engines": {

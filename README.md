@@ -5,12 +5,22 @@ English | [中文](README.zh.md)
 [![npm version](https://img.shields.io/npm/v/dsh-tool-antigravity.svg?color=blue)](https://www.npmjs.com/package/dsh-tool-antigravity)
 [![license](https://img.shields.io/github/license/Jaylor-Wang/dsh-tool-antigravity.svg)](LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/Jaylor-Wang/dsh-tool-antigravity.svg)](https://github.com/Jaylor-Wang/dsh-tool-antigravity/releases)
-[![Tests](https://img.shields.io/badge/tests-28%20suites%20%7C%20268%20passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-28%20suites%20%7C%20271%20passed-brightgreen.svg)](tests/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Strict%20Types-blue.svg)](tsconfig.json)
 
 High-performance, streamlined Antigravity capability bundle plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH).
 
 Provides private Google OAuth 2.0 PKCE authentication, multi-model LLM routing (`google-antigravity`), session-persistent image generation and editing (`generate_image`, `list_images`), and an interactive Web settings panel with live quota visualization.
+
+---
+
+## Highlights in v0.2.1 (Stability & Connection Keep-Alive)
+
+- **Pre-stream Idempotent Network Retry**: Automatically retries transient network interruptions (e.g. connection resets, timeouts, or `502/503/504` errors) once prior to first byte emission (500ms backoff), while preserving strict fail-closed guarantees once generation starts to prevent duplicate billing.
+- **TCP Socket Keep-Alive & NoDelay**: Configures 15-second TCP keepalive probes and `noDelay` on raw HTTP/1.1 TLS and proxy sockets, preventing local proxies (Clash, Surge, V2Ray) and NAT routers from dropping idle connections during model reasoning pauses.
+- **Relaxed Stream Timeouts**: Extended stream idle timeout to 120s and total timeout to 600s (10 min), comfortably accommodating extended thinking models like Gemini 3.8 Flash, Gemini 2.5 Pro, and Claude reasoning models.
+- **Unified Credential Storage**: Consolidated the single-account credential storage under `dsh-tool-antigravity/auth.json`.
+- **Hardened Proxy Configuration**: Auto-normalizes proxy URLs without scheme prefix, adds `HTTP_PROXY` fallback, and retains low-level system error causes for streamlined diagnosis.
 
 ---
 
