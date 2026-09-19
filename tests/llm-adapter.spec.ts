@@ -519,6 +519,34 @@ describe('Antigravity LLM adapter', () => {
     expect(chunks.some(chunk => chunk.type === 'text-delta' && chunk.text === 'ok')).toBe(true)
   })
 
+  it('retries exactly once after a pre-delta network failure', async () => {
+    const transport = {
+      request: vi.fn()
+        .mockRejectedValueOnce(new PrivateTransportError('offline', 'The private endpoint closed before response headers', { accepted: false }))
+        .mockResolvedValueOnce(new Response('data: {"response":{"parts":[{"text":"recovered"}],"finishReason":"STOP"}}\n\n')),
+    }
+    const auth = { credential: vi.fn(async () => credential('token')) }
+    const adapter = new AntigravityAdapter({ auth, transport })
+    const chunks: StreamChunk[] = []
+    for await (const chunk of adapter.stream(options())) chunks.push(chunk)
+    expect(transport.request).toHaveBeenCalledTimes(2)
+    expect(chunks.some(chunk => chunk.type === 'text-delta' && chunk.text === 'recovered')).toBe(true)
+  })
+
+  it('retries exactly once after a pre-delta 503 service unavailable response', async () => {
+    const transport = {
+      request: vi.fn()
+        .mockResolvedValueOnce(new Response('', { status: 503 }))
+        .mockResolvedValueOnce(new Response('data: {"response":{"parts":[{"text":"recovered-503"}],"finishReason":"STOP"}}\n\n')),
+    }
+    const auth = { credential: vi.fn(async () => credential('token')) }
+    const adapter = new AntigravityAdapter({ auth, transport })
+    const chunks: StreamChunk[] = []
+    for await (const chunk of adapter.stream(options())) chunks.push(chunk)
+    expect(transport.request).toHaveBeenCalledTimes(2)
+    expect(chunks.some(chunk => chunk.type === 'text-delta' && chunk.text === 'recovered-503')).toBe(true)
+  })
+
   it('exposes newly supported Gemini 3.8 while filtering absent legacy models through the public catalog', async () => {
     const ctx = new Context()
     try {

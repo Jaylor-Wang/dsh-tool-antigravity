@@ -67,6 +67,9 @@ export class AuthStoreError extends Error {
   }
 }
 
+/** Plugin-owned credential directory, named after the plugin id. */
+export const AUTH_STORE_DIRNAME = 'dsh-tool-antigravity' as const
+
 /** Resolve the plugin-owned default path without reading it. */
 export function defaultAuthStorePath(
   env: NodeJS.ProcessEnv = process.env,
@@ -78,13 +81,13 @@ export function defaultAuthStorePath(
     const base = typeof windowsDataHome === 'string' && windowsDataHome.length > 0
       ? windowsDataHome
       : env.USERPROFILE ?? home ?? ''
-    return join(base, 'dsh-antigravity-auth', 'auth.json')
+    return join(base, AUTH_STORE_DIRNAME, 'auth.json')
   }
   const dataHome = env.XDG_DATA_HOME
   const base = typeof dataHome === 'string' && dataHome.length > 0
     ? dataHome
     : join(home ?? '', '.local', 'share')
-  return join(base, 'dsh-antigravity-auth', 'auth.json')
+  return join(base, AUTH_STORE_DIRNAME, 'auth.json')
 }
 
 /** Create one store whose public API never exposes an access token field. */

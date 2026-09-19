@@ -79,6 +79,7 @@ async function connectDirect(url: URL, timeoutMs: number, signal: AbortSignal | 
     port: Number(url.port || DEFAULT_HTTPS_PORT),
     servername: url.hostname,
   })
+  configureSocketKeepAlive(socket)
   await waitForConnect(socket, 'secureConnect', timeoutMs, signal)
   return socket
 }
@@ -89,6 +90,7 @@ async function connectThroughProxy(proxy: URL, target: URL, timeoutMs: number, s
     host: proxy.hostname,
     port: Number(proxy.port || DEFAULT_PROXY_PORT),
   })
+  configureSocketKeepAlive(proxySocket)
   await waitForConnect(proxySocket, 'connect', timeoutMs, signal)
   const targetPort = Number(target.port || DEFAULT_HTTPS_PORT)
   proxySocket.write(
@@ -105,8 +107,15 @@ async function connectThroughProxy(proxy: URL, target: URL, timeoutMs: number, s
   if (leftover.byteLength > 0) proxySocket.unshift(leftover)
   proxySocket.resume()
   const socket = tls.connect({ socket: proxySocket, servername: target.hostname })
+  configureSocketKeepAlive(socket)
   await waitForConnect(socket, 'secureConnect', timeoutMs, signal)
   return socket
+}
+
+function configureSocketKeepAlive(socket: Duplex): void {
+  const netSocket = socket as net.Socket
+  if (typeof netSocket.setNoDelay === 'function') netSocket.setNoDelay(true)
+  if (typeof netSocket.setKeepAlive === 'function') netSocket.setKeepAlive(true, 15_000)
 }
 
 async function waitForConnect(
@@ -127,7 +136,7 @@ async function waitForConnect(
       action()
     }
     const onConnect = (): void => finish(resolve)
-    const onError = (): void => finish(() => reject(new PrivateTransportError('offline', 'The private endpoint could not be reached', { accepted: false })))
+    const onError = (error: unknown): void => finish(() => reject(new PrivateTransportError('offline', 'The private endpoint could not be reached', { accepted: false, cause: error })))
     const onAbort = (): void => finish(() => {
       socket.destroy()
       reject(cancelled(false))
@@ -164,7 +173,7 @@ async function waitForHead(
     const onError = (error: unknown): void => finish(() => reject(
       error instanceof PrivateTransportError
         ? error
-        : new PrivateTransportError('offline', 'The private endpoint closed before response headers', { accepted }),
+        : new PrivateTransportError('offline', 'The private endpoint closed before response headers', { accepted, cause: error }),
     ))
     const onAbort = (): void => finish(() => {
       socket.destroy()
@@ -411,10 +420,11 @@ function proxyAuthorizationHeader(proxy: URL): string {
 function httpsProxy(url: URL): URL | undefined {
   const noProxy = process.env.NO_PROXY ?? process.env.no_proxy ?? ''
   if (matchesNoProxy(url.hostname, noProxy)) return undefined
-  const raw = process.env.HTTPS_PROXY ?? process.env.https_proxy ?? process.env.ALL_PROXY ?? process.env.all_proxy
+  const raw = process.env.HTTPS_PROXY ?? process.env.https_proxy ?? process.env.ALL_PROXY ?? process.env.all_proxy ?? process.env.HTTP_PROXY ?? process.env.http_proxy
   if (raw === undefined || raw.length === 0) return undefined
   try {
-    const proxy = new URL(raw)
+    const normalized = /^https?:\/\//i.test(raw) ? raw : `http://${raw}`
+    const proxy = new URL(normalized)
     if (proxy.protocol !== 'http:') throw new PrivateTransportError('offline', 'The configured HTTPS proxy protocol is unsupported', { accepted: false })
     return proxy
   } catch (error) {

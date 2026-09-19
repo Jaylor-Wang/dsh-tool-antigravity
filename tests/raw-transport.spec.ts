@@ -76,7 +76,7 @@ vi.mock('node:tls', async () => {
 import { createPrivateTransport, readPrivateText } from '../src/private-transport.ts'
 import { ANTIGRAVITY_GENERATE_ENDPOINT } from '../src/llm-adapter.ts'
 
-const proxyEnvironmentKeys = ['NO_PROXY', 'no_proxy', 'HTTPS_PROXY', 'https_proxy', 'ALL_PROXY', 'all_proxy'] as const
+const proxyEnvironmentKeys = ['NO_PROXY', 'no_proxy', 'HTTPS_PROXY', 'https_proxy', 'ALL_PROXY', 'all_proxy', 'HTTP_PROXY', 'http_proxy'] as const
 const originalProxyEnvironment = Object.fromEntries(proxyEnvironmentKeys.map(key => [key, process.env[key]]))
 
 beforeEach(() => {
@@ -173,6 +173,19 @@ describe('fixed private raw transport', () => {
     expect(String(error)).not.toMatch(/Injected|proxy-pass|private-access-fixture/u)
     expect(socketState.proxyRequest).toBe('')
     expect(socketState.request).toBe('')
+  })
+
+  it('normalizes proxy URLs without scheme and falls back to HTTP_PROXY', async () => {
+    delete process.env.NO_PROXY
+    process.env.HTTP_PROXY = 'proxy.invalid:8080'
+    const response = await createPrivateTransport().request({
+      url: ANTIGRAVITY_GENERATE_ENDPOINT,
+      accessToken: 'private-access-fixture',
+      body: '{"request":"normalized-proxy"}',
+    })
+
+    await expect(readPrivateText(response)).resolves.toBe('hello')
+    expect(socketState.proxyRequest).toContain('CONNECT daily-cloudcode-pa.googleapis.com:443 HTTP/1.1\r\n')
   })
 
   it('aborts a pending authenticated CONNECT without dispatching upstream', async () => {

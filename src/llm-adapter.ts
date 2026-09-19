@@ -247,6 +247,7 @@ export class AntigravityAdapter extends LlmAdapter {
     }
     const hasEmitted = { value: false }
     let replayed = false
+    let retriedNetwork = false
     for (;;) {
       const credential = await this.readCredential(signal, replayed)
       if (credential === undefined) {
@@ -271,6 +272,11 @@ export class AntigravityAdapter extends LlmAdapter {
           responseHeaderTimeoutMs: this.options.responseHeaderTimeoutMs,
         })
       } catch (error) {
+        if (!retriedNetwork && !hasEmitted.value && !isAborted(signal) && isRetryableNetworkError(error)) {
+          retriedNetwork = true
+          await waitRetryBackoff(500, signal)
+          continue
+        }
         throw toLlmError(error)
       }
       const statusError = privateStatusError(response.status)
@@ -278,6 +284,12 @@ export class AntigravityAdapter extends LlmAdapter {
         if (statusError.code === 'authentication' && !replayed && !hasEmitted.value && !isAborted(signal)) {
           await cancelResponse(response)
           replayed = true
+          continue
+        }
+        if ((response.status === 502 || response.status === 503 || response.status === 504) && !retriedNetwork && !hasEmitted.value && !isAborted(signal)) {
+          await cancelResponse(response)
+          retriedNetwork = true
+          await waitRetryBackoff(500, signal)
           continue
         }
         if (response.status === 400 && await responseReportsContextWindowExceeded(response, {
@@ -300,6 +312,11 @@ export class AntigravityAdapter extends LlmAdapter {
         const privateError = error instanceof PrivateTransportError ? error : undefined
         if (privateError?.code === 'authentication' && !replayed && !hasEmitted.value && !isAborted(signal)) {
           replayed = true
+          continue
+        }
+        if (!retriedNetwork && !hasEmitted.value && !isAborted(signal) && isRetryableNetworkError(error)) {
+          retriedNetwork = true
+          await waitRetryBackoff(500, signal)
           continue
         }
         throw toLlmError(error)
@@ -1361,9 +1378,12 @@ function toLlmError(error: unknown): LlmError {
   if (error instanceof PrivateTransportError) {
     const kind = classifyPrivateFailure(error)
     const code = LLM_FAILURE_CODES[kind]
+    // Surface the failure class (and HTTP status when present) so operators can
+    // tell network drops from auth or quota failures without reading logs.
+    const detail = error.status === undefined ? ` (${code})` : ` (${code}, status ${error.status})`
     const message = kind === 'rate-limited'
       ? 'Antigravity rate limit reached (Google returned 429 Resource Exhausted); please wait for your quota window to refresh'
-      : 'The Antigravity private request failed safely'
+      : `The Antigravity private request failed safely${detail}`
     return error.status === undefined
       ? new LlmError(message, code)
       : new LlmError(message, code, { status: error.status })
@@ -1418,4 +1438,25 @@ function isAborted(signal: AbortSignal | undefined): boolean {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isRetryableNetworkError(error: unknown): boolean {
+  if (!(error instanceof PrivateTransportError)) return false
+  return error.code === 'offline' || error.code === 'timeout' || error.code === 'upstream'
+}
+
+async function waitRetryBackoff(delayMs: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted === true) return
+  await new Promise<void>(resolve => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const onAbort = (): void => {
+      if (timer !== undefined) clearTimeout(timer)
+      resolve()
+    }
+    timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, delayMs)
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
 }

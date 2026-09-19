@@ -24,9 +24,9 @@ export class PrivateTransportError extends Error {
   constructor(
     code: PrivateTransportErrorCode,
     message: string,
-    options: { readonly status?: number; readonly accepted?: boolean } = {},
+    options: { readonly status?: number; readonly accepted?: boolean; readonly cause?: unknown } = {},
   ) {
-    super(message)
+    super(message, options.cause !== undefined ? { cause: options.cause } : undefined)
     this.name = 'PrivateTransportError'
     this.code = code
     this.accepted = options.accepted ?? true

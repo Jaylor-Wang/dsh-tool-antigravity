@@ -19,7 +19,7 @@ async function storeFixture() {
 describe('single-account Antigravity auth store', () => {
   it('uses the Windows local application-data path when running on Windows', () => {
     expect(defaultAuthStorePath({ LOCALAPPDATA: '/user/local-app-data' }, undefined, 'win32'))
-      .toBe(join('/user/local-app-data', 'dsh-antigravity-auth', 'auth.json'))
+      .toBe(join('/user/local-app-data', 'dsh-tool-antigravity', 'auth.json'))
   })
 
   it('ignores POSIX mode bits on Windows while preserving strict POSIX enforcement', async () => {
