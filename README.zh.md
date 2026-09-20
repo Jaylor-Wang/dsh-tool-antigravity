@@ -10,7 +10,7 @@
 
 为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) 打造的高性能 Antigravity 核心能力包插件。
 
-提供私有 Google OAuth 2.0 PKCE 认证闭环、全系多模型路由服务（`google-antigravity`）、会话持久化图片生成与多轮编辑工具（`generate_image` / `list_images`），以及具备 SWR 容错缓存与微光动效的实时 Web 设置面板与配额看板。
+提供私有 Google OAuth 2.0 PKCE 认证闭环、全系多模型路由服务（`google-antigravity`）、会话持久化 Nano Banana 2 图片生成与多轮编辑工具（`generate_image` / `list_images`），以及具备 SWR 容错缓存与微光动效的实时 Web 设置面板与配额看板。
 
 ---
 
@@ -21,15 +21,6 @@
 - **流式超时阈值放宽**：将流空闲超时（Idle Timeout）提升至 120 秒，总超时（Total Timeout）放宽至 600 秒（10 分钟），充分容纳 Gemini 3.8 Flash、Gemini 2.5 Pro 及 Claude 系列模型的深度推理阶段。
 - **凭据存储统一**：凭据默认持久化路径统归 `C:\Users\<user>\AppData\Local\dsh-tool-antigravity\auth.json`，解决双目录残留与冲突隐患。
 - **代理环境自适应**：支持无协议前缀的代理地址自动规范化补全，支持 `HTTP_PROXY` 环境变量自动降级兜底，异常透传底层系统错误详情。
-
----
-
-## v0.2.0 版本重要更新
-
-- **全面收敛为两大核心支柱**：彻底剥离并移除“网页搜索”和“视频理解”模块，大幅降低依赖包体积与内存开销，零冗余开箱即用。
-- **Windows 浏览器拉起参数修复**：底层 opener 采用 `windowsVerbatimArguments: true`，彻底根除 Windows 下 `cmd.exe` 将 URL 中 `&` 解析为命令连接符而截断 `&response_type=code` 参数的顽疾，保证一键顺畅完成 Google 授权。
-- **生命周期可控的 Host RPC 架构**：通过 Cordis 响应式注入将 `/api/dsh-tool-antigravity/*` 路由注册到 WebServer，配合严格的 Loopback 本地回环守卫保障通信安全。
-- **100% 验证与质量保障**：全项目 28 个测试套件、268 项自动化测试全部通过，TypeScript 严格模式类型检查 0 报错。
 
 ---
 
@@ -54,8 +45,8 @@
 | `claude-opus-4-6-thinking` | Claude Opus 4.6 | 文本, 视觉, 工具 | 动态深度推理 |
 | `gpt-oss-120b-medium` | GPT-OSS 120B | 文本, 工具 | 固定档位 |
 
-### 3. 图片生成与多轮编辑工具
-- **`generate_image`**：支持基于自然语言提示词的图像生成，以及基于会话图片的图生图/多轮编辑。
+### 3. Nano Banana 2 图片生成与多轮编辑工具
+- **`generate_image`**：依托 Nano Banana 2（`gemini-3.1-flash-image`）原生多模态能力，支持基于自然语言提示词的图像生成，以及基于会话图片的图生图/多轮编辑。
 - **`list_images`**：供智能体检索当前会话中生成的图片附件。
 - 深度接入 DSH `AttachmentStore` 与 `FileSystem`，结合 TOCTOU 防穿越路径准入，杜绝将大量 Base64 直接回灌进对话上下文。
 

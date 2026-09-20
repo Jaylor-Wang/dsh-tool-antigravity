@@ -10,7 +10,7 @@ English | [中文](README.zh.md)
 
 High-performance, streamlined Antigravity capability bundle plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH).
 
-Provides private Google OAuth 2.0 PKCE authentication, multi-model LLM routing (`google-antigravity`), session-persistent image generation and editing (`generate_image`, `list_images`), and an interactive Web settings panel with live quota visualization.
+Provides private Google OAuth 2.0 PKCE authentication, multi-model LLM routing (`google-antigravity`), session-persistent Nano Banana 2 image generation and editing (`generate_image`, `list_images`), and an interactive Web settings panel with live quota visualization.
 
 ---
 
@@ -21,15 +21,6 @@ Provides private Google OAuth 2.0 PKCE authentication, multi-model LLM routing (
 - **Relaxed Stream Timeouts**: Extended stream idle timeout to 120s and total timeout to 600s (10 min), comfortably accommodating extended thinking models like Gemini 3.8 Flash, Gemini 2.5 Pro, and Claude reasoning models.
 - **Unified Credential Storage**: Consolidated the single-account credential storage under `dsh-tool-antigravity/auth.json`.
 - **Hardened Proxy Configuration**: Auto-normalizes proxy URLs without scheme prefix, adds `HTTP_PROXY` fallback, and retains low-level system error causes for streamlined diagnosis.
-
----
-
-## Highlights in v0.2.0
-
-- **Streamlined Two-Pillar Scope**: Completely eliminated search and video modules for minimal footprint, memory safety, and zero bloat.
-- **Windows Browser Opener Fix**: Resolved `cmd.exe` ampersand truncation (`&response_type=code`) using `windowsVerbatimArguments: true`, ensuring smooth 1-click Google OAuth flow on Windows.
-- **Robust Host RPC Integration**: Lifecycle-managed loopback Fetch handler for `/api/dsh-tool-antigravity/*` endpoints with fail-closed security.
-- **100% Verified Quality**: 28 test suites, 268 automated tests covering transports, lifecycle, gates, quota, and client UI with strict TypeScript checks.
 
 ---
 
@@ -54,8 +45,8 @@ Provides private Google OAuth 2.0 PKCE authentication, multi-model LLM routing (
 | `claude-opus-4-6-thinking` | Claude Opus 4.6 | Text, Vision, Tools | Dynamic Reasoning |
 | `gpt-oss-120b-medium` | GPT-OSS 120B | Text, Tools | Fixed Effort |
 
-### 3. Image Generation & Multi-Turn Editing
-- **`generate_image`**: Prompt-based image creation and iterative image-to-image editing using session references.
+### 3. Nano Banana 2 Image Generation & Multi-Turn Editing
+- **`generate_image`**: Prompt-based image creation and iterative image-to-image editing powered by Nano Banana 2 (`gemini-3.1-flash-image`) using session references.
 - **`list_images`**: Inspect and retrieve generated image attachments within the current session.
 - Fully integrated with DSH `AttachmentStore` and `FileSystem` with TOCTOU path escape protection without polluting chat context with raw base64 payloads.
 
