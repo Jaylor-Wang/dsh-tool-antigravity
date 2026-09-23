@@ -19,7 +19,7 @@ export interface AntigravityAuthSettingsProps {
   rpc: AntigravityAuthRpcClient
   t: (key: AntigravityAuthKey) => string
   subscribe: (listener: () => void) => () => void
-  imageScope?: SettingsScope<AntigravityImageSettings>
+  imageScope?: SettingsScope<AntigravityImageSettings> | undefined
 }
 
 type LoadState = 'loading' | 'ready' | 'error'

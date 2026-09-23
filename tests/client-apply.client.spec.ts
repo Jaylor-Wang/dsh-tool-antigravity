@@ -70,7 +70,7 @@ function bench(isLoopback = true) {
 
 describe('Antigravity client apply', () => {
   it('declares its services and removes dictionaries, slots, and listeners on teardown', async () => {
-    expect(inject).toEqual(['slots', 'locale', 'connection', 'settingsScope'])
+    expect(inject).toEqual(['slots', 'locale', 'connection'])
     const b = bench()
 
     expect(b.slots.map(record => record.options)).toEqual([

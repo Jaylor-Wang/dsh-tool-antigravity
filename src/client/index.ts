@@ -20,7 +20,7 @@ export { en, zh } from './locales.ts'
 export type { AntigravityAuthKey } from './locales.ts'
 
 /** Client services required by the settings section and its loopback RPC. */
-export const inject = ['slots', 'locale', 'connection', 'settingsScope']
+export const inject = ['slots', 'locale', 'connection']
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -37,8 +37,14 @@ export function apply(ctx: ClientContext): void {
   if (!connection.isLoopback) return
   const rpc = createAntigravityAuthRpcClient(connection.rpc)
   const t = ctx.locale.bind(NS) as AntigravityAuthSettingsProps['t']
-  const settingsScope = (ctx as ClientContext & { settingsScope?: { bind<T>(spec: { namespace: string; decode?: (value: unknown) => T | undefined }): SettingsScope<T> } }).settingsScope
-  const imageScope = settingsScope?.bind<AntigravityImageSettings>({ namespace: 'antigravity-image', decode: decodeImageSettings })
+  const context = ctx as ClientContext & {
+    configForms?: { get<T>(namespace: string): unknown }
+    settingsScope?: { bind<T>(spec: { namespace: string; decode?: (value: unknown) => T | undefined }): unknown }
+  }
+  const imageScope = (context.configForms?.get
+    ? context.configForms.get('antigravity-image')
+    : context.settingsScope?.bind({ namespace: 'antigravity-image', decode: decodeImageSettings })
+  ) as SettingsScope<AntigravityImageSettings> | undefined
   const listeners = new Set<() => void>()
   const subscribe = (listener: () => void): (() => void) => {
     listeners.add(listener)
