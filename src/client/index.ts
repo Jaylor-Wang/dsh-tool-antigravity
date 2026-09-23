@@ -31,37 +31,41 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
 /** Register one disposable settings section and no capability controls. */
 export function apply(ctx: ClientContext): void {
-  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'antigravity-auth: copy dictionaries')
+  try {
+    ctx.effect(() => ctx.locale?.register(NS, { zh, en }), 'antigravity-auth: copy dictionaries')
 
-  const connection = ctx.get('connection') as unknown as ConnectionHandle
-  if (!connection.isLoopback) return
-  const rpc = createAntigravityAuthRpcClient(connection.rpc)
-  const t = ctx.locale.bind(NS) as AntigravityAuthSettingsProps['t']
-  const context = ctx as ClientContext & {
-    configForms?: { get<T>(namespace: string): unknown }
-    settingsScope?: { bind<T>(spec: { namespace: string; decode?: (value: unknown) => T | undefined }): unknown }
-  }
-  const imageScope = (context.configForms?.get
-    ? context.configForms.get('antigravity-image')
-    : context.settingsScope?.bind({ namespace: 'antigravity-image', decode: decodeImageSettings })
-  ) as SettingsScope<AntigravityImageSettings> | undefined
-  const listeners = new Set<() => void>()
-  const subscribe = (listener: () => void): (() => void) => {
-    listeners.add(listener)
-    return () => { listeners.delete(listener) }
-  }
-  const reset = (): void => {
-    for (const listener of listeners) listener()
-  }
-  ctx.effect(() => ctx.on('connection/reset', reset), 'antigravity-auth: connection invalidation')
+    const connection = (ctx.get ? ctx.get('connection') : (ctx as unknown as { connection?: unknown }).connection) as ConnectionHandle | undefined
+    if (!connection || !connection.isLoopback) return
+    const rpc = createAntigravityAuthRpcClient(connection.rpc)
+    const t = (ctx.locale?.bind ? ctx.locale.bind(NS) : ((key: AntigravityAuthKey) => zh[key] ?? key)) as AntigravityAuthSettingsProps['t']
+    const context = ctx as ClientContext & {
+      configForms?: { get<T>(namespace: string): unknown }
+      settingsScope?: { bind<T>(spec: { namespace: string; decode?: (value: unknown) => T | undefined }): unknown }
+    }
+    const imageScope = (context.configForms?.get
+      ? context.configForms.get('antigravity-image')
+      : context.settingsScope?.bind?.({ namespace: 'antigravity-image', decode: decodeImageSettings })
+    ) as SettingsScope<AntigravityImageSettings> | undefined
+    const listeners = new Set<() => void>()
+    const subscribe = (listener: () => void): (() => void) => {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
+    }
+    const reset = (): void => {
+      for (const listener of listeners) listener()
+    }
+    ctx.effect(() => ctx.on?.('connection/reset', reset), 'antigravity-auth: connection invalidation')
 
-  ctx.slots.inject('settings.section', () => ctx.slots.register({
-    name: 'settings.section',
-    id: 'antigravity-auth',
-    order: 20,
-    label: () => t('nav'),
-    inject: (): AntigravityAuthSettingsProps => ({ rpc, t, subscribe, imageScope }),
-  }, AntigravityAuthSettings))
+    ctx.slots?.inject?.('settings.section', () => ctx.slots.register({
+      name: 'settings.section',
+      id: 'antigravity-auth',
+      order: 20,
+      label: () => t('nav'),
+      inject: (): AntigravityAuthSettingsProps => ({ rpc, t, subscribe, imageScope }),
+    }, AntigravityAuthSettings))
+  } catch (err) {
+    console.error('[dsh-tool-antigravity] Failed in client apply:', err)
+  }
 }
 
 function decodeImageSettings(value: unknown): AntigravityImageSettings | undefined {
