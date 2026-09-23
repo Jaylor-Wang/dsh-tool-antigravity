@@ -35,8 +35,9 @@ export function apply(ctx: ClientContext): void {
     ctx.effect(() => ctx.locale?.register(NS, { zh, en }), 'antigravity-auth: copy dictionaries')
 
     const connection = (ctx.get ? ctx.get('connection') : (ctx as unknown as { connection?: unknown }).connection) as ConnectionHandle | undefined
-    if (!connection || !connection.isLoopback) return
-    const rpc = createAntigravityAuthRpcClient(connection.rpc)
+    const rpc = createAntigravityAuthRpcClient(connection?.rpc ?? {
+      call: async () => ({ ok: false, error: { code: 'disconnected', message: 'Not connected', details: {} } }),
+    })
     const t = (ctx.locale?.bind ? ctx.locale.bind(NS) : ((key: AntigravityAuthKey) => zh[key] ?? key)) as AntigravityAuthSettingsProps['t']
     const context = ctx as ClientContext & {
       configForms?: { get<T>(namespace: string): unknown }

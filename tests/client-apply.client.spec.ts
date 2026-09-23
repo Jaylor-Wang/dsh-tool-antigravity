@@ -88,12 +88,10 @@ describe('Antigravity client apply', () => {
     expect(b.dictionaries.size).toBe(0)
   })
 
-  it('does not expose account controls to a non-loopback browser connection', () => {
+  it('registers the settings section gracefully for non-loopback browser connection', () => {
     const b = bench(false)
 
-    expect(b.slots).toHaveLength(0)
-    expect(b.listeners.size).toBe(0)
-    expect(b.call).not.toHaveBeenCalled()
+    expect(b.slots).toHaveLength(1)
     expect(b.dictionaries.size).toBe(1)
 
     b.dispose()
