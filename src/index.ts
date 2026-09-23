@@ -16,12 +16,23 @@ import {
   commandAccountMode, createLoopbackRpcGuard, type LoopbackRpcMode,
 } from './loopback-rpc.ts'
 import { mountCapabilityLifecycle } from './capability-lifecycle.ts'
+import { applyProxySetting, getStoredProxy } from './proxy-config.ts'
 
 export const name = 'antigravity-auth'
 export const inject = ['llm', 'attachments']
 
+export interface AntigravityAuthConfig {
+  proxy?: string
+}
+
 /** Mount the Host-only OAuth service and its guarded account RPC channel. */
-export function apply(ctx: Context): void {
+export function apply(ctx: Context, config: AntigravityAuthConfig = {}): void {
+  const initial = config.proxy || getStoredProxy()
+  if (initial) applyProxySetting(initial)
+  const configContext = ctx as Context & { on?: (event: string, listener: (nextConfig: AntigravityAuthConfig | undefined) => void) => void }
+  configContext.on?.('config', (nextConfig: AntigravityAuthConfig | undefined) => {
+    if (nextConfig) applyProxySetting(nextConfig.proxy || getStoredProxy())
+  })
   const service = createAntigravityAuthService({
     storePath: defaultAuthStorePath(),
     autoActivateGates: true,
@@ -55,7 +66,12 @@ export function apply(ctx: Context): void {
     if (guard.mode === 'blocked') {
       connectionCtx.logger.warn('antigravity-auth: account RPC is disabled because the WebServer is not loopback-bound')
     }
-    return registerAccountRoutes(connectionCtx.connection, ANTIGRAVITY_AUTH_RPC_NAMESPACE, ['status', 'models', 'usage', 'acknowledge-risk', 'login', 'cancel', 'cancel-login', 'logout', 'revoke'], guard.handler)
+    return registerAccountRoutes(
+      connectionCtx.connection,
+      ANTIGRAVITY_AUTH_RPC_NAMESPACE,
+      ['status', 'models', 'usage', 'acknowledge-risk', 'login', 'cancel', 'cancel-login', 'logout', 'revoke', 'get-proxy', 'set-proxy'],
+      guard.handler,
+    )
   })
   mountCapabilityLifecycle({
     ctx,
@@ -91,3 +107,4 @@ export * from './media-admission.ts'
 export * from './model-catalog.ts'
 export * from './capability-gates.ts'
 export * from './live-gates.ts'
+export * from './proxy-config.ts'

@@ -42,7 +42,10 @@ export function createRawPrivateDispatcher(): (input: RawPrivateRequest) => Prom
     })
     const socket = await connectTls(url, input.responseHeaderTimeoutMs, input.signal)
     let dispatched = false
-    const abort = (): void => { socket.destroy(cancelled(dispatched)) }
+    const abort = (): void => {
+      socket.on('error', () => {})
+      socket.destroy()
+    }
     try {
       if (isAborted(input.signal)) throw cancelled(false)
       input.signal?.addEventListener('abort', abort, { once: true })
@@ -274,7 +277,10 @@ function buildResponseBody(
     current = pipeStage(current, gunzip)
     current = pipeStage(current, new PassThrough(), () => new PrivateTransportError('protocol-drift', 'The private gzip response was malformed'))
   }
-  const abort = (): void => { socket.destroy(cancelled(true)) }
+  const abort = (): void => {
+    socket.on('error', () => {})
+    socket.destroy()
+  }
   const cleanup = (): void => {
     signal?.removeEventListener('abort', abort)
     socket.destroy()
@@ -417,10 +423,16 @@ function proxyAuthorizationHeader(proxy: URL): string {
   return `Proxy-Authorization: Basic ${Buffer.from(`${username}:${password}`).toString('base64')}\r\n`
 }
 
+let explicitProxy: string | undefined = undefined
+
+export function setExplicitProxy(value: string | undefined): void {
+  explicitProxy = typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined
+}
+
 function httpsProxy(url: URL): URL | undefined {
   const noProxy = process.env.NO_PROXY ?? process.env.no_proxy ?? ''
   if (matchesNoProxy(url.hostname, noProxy)) return undefined
-  const raw = process.env.HTTPS_PROXY ?? process.env.https_proxy ?? process.env.ALL_PROXY ?? process.env.all_proxy ?? process.env.HTTP_PROXY ?? process.env.http_proxy
+  const raw = explicitProxy ?? process.env.HTTPS_PROXY ?? process.env.https_proxy ?? process.env.ALL_PROXY ?? process.env.all_proxy ?? process.env.HTTP_PROXY ?? process.env.http_proxy
   if (raw === undefined || raw.length === 0) return undefined
   try {
     const normalized = /^https?:\/\//i.test(raw) ? raw : `http://${raw}`

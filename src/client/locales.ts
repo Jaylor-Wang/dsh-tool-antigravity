@@ -118,6 +118,14 @@ export const en = {
   remaining: 'remaining',
   refreshesIn: 'Refreshes in {time}',
   quotaDayUnit: 'd',
+  proxyCardTitle: 'Network Proxy (HTTP/HTTPS Proxy)',
+  proxyCardIntro: 'Manually bind proxy server URL (takes precedence over environment variables; leave blank for auto/direct).',
+  proxyPlaceholder: 'e.g. http://127.0.0.1:7890 (leave blank for auto)',
+  saveProxy: 'Save Proxy',
+  savingProxy: 'Saving…',
+  proxySaved: 'Proxy saved and applied: ',
+  proxyCleared: 'Proxy cleared, reverted to auto environment detection / direct connection',
+  saveProxyFailed: 'Failed to save proxy: ',
 } as const
 
 export type AntigravityAuthKey = keyof typeof en
@@ -240,4 +248,12 @@ export const zh: Record<AntigravityAuthKey, string> = {
   remaining: '剩余',
   refreshesIn: '{time} 后刷新',
   quotaDayUnit: '天',
+  proxyCardTitle: '网络代理设置 (HTTP/HTTPS Proxy)',
+  proxyCardIntro: '手动绑定代理服务器地址（优先级高于系统环境变量；留空则自动识别环境或直连）。',
+  proxyPlaceholder: '例如 http://127.0.0.1:7890 (留空为自动)',
+  saveProxy: '保存代理',
+  savingProxy: '保存中…',
+  proxySaved: '代理已保存并生效: ',
+  proxyCleared: '代理已清空，恢复为自动检测环境变量 / 直连',
+  saveProxyFailed: '保存代理失败: ',
 }

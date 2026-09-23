@@ -54,6 +54,9 @@ export function AntigravityAuthSettings({ rpc, t, subscribe, imageScope }: Antig
   const [_error, setError] = useState<string | null>(null)
   const [loginBusy, setLoginBusy] = useState(false)
   const [actionBusy, setActionBusy] = useState(false)
+  const [proxyInput, setProxyInput] = useState('')
+  const [proxySaving, setProxySaving] = useState(false)
+  const [proxyMessage, setProxyMessage] = useState('')
   const [resetTick, setResetTick] = useState(0)
   const statusGeneration = useRef(0)
   const quotaGeneration = useRef(0)
@@ -65,6 +68,34 @@ export function AntigravityAuthSettings({ rpc, t, subscribe, imageScope }: Antig
 
   useEffect(() => subscribe(() => { setResetTick(value => value + 1) }), [subscribe])
 
+  useEffect(() => {
+    let active = true
+    rpc.getProxy?.().then(res => {
+      if (active && res?.ok && typeof res.value?.proxy === 'string') {
+        setProxyInput(res.value.proxy)
+      }
+    })
+    return () => { active = false }
+  }, [rpc])
+
+  const saveProxy = async (): Promise<void> => {
+    setProxySaving(true)
+    try {
+      const trimmed = proxyInput.trim()
+      const res = await rpc.setProxy?.(trimmed)
+      if (res?.ok) {
+        setProxyMessage(trimmed ? `${t('proxySaved')}${trimmed}` : t('proxyCleared'))
+      } else {
+        setProxyMessage(`${t('saveProxyFailed')}${res?.error?.message ?? ''}`)
+      }
+      setTimeout(() => setProxyMessage(''), 4000)
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      setProxyMessage(`${t('saveProxyFailed')}${message}`)
+    } finally {
+      setProxySaving(false)
+    }
+  }
   const load = useCallback(async (signal?: AbortSignal, silent = false) => {
     const generation = ++statusGeneration.current
     if (!silent) {
@@ -302,6 +333,50 @@ export function AntigravityAuthSettings({ rpc, t, subscribe, imageScope }: Antig
           {status?.revoke === undefined || status.revoke.state === 'idle' ? null : (
             <p className="agy-card-subtext" role="status">{revokeStatusText(status.revoke.state, t)}</p>
           )}
+        </article>
+
+        {/* Card 2: Network Proxy */}
+        <article className="agy-card">
+          <div className="agy-card-header">
+            <div className="agy-card-identity">
+              <h2 className="agy-card-title">{t('proxyCardTitle')}</h2>
+              <p className="agy-card-intro">{t('proxyCardIntro')}</p>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '4px' }}>
+            <input
+              type="text"
+              placeholder={t('proxyPlaceholder')}
+              value={proxyInput}
+              onChange={e => setProxyInput(e.target.value)}
+              style={{
+                flex: 1,
+                background: 'rgba(255, 255, 255, 0.06)',
+                border: '1px solid rgba(255, 255, 255, 0.16)',
+                borderRadius: '6px',
+                color: '#ffffff',
+                padding: '6px 10px',
+                fontSize: '13px',
+                outline: 'none',
+              }}
+            />
+            <button
+              className="agy-btn agy-btn-outline"
+              type="button"
+              disabled={proxySaving}
+              onClick={() => { void saveProxy() }}
+            >
+              {proxySaving ? t('savingProxy') : t('saveProxy')}
+            </button>
+          </div>
+          {proxyMessage ? (
+            <p
+              className="agy-card-subtext"
+              style={{ color: proxyMessage.startsWith(t('saveProxyFailed')) ? '#ef4444' : '#10b981', margin: '2px 0 0' }}
+            >
+              {proxyMessage}
+            </p>
+          ) : null}
         </article>
 
         {/* Card 3: Image Creation */}

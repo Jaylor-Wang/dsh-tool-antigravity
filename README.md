@@ -14,6 +14,15 @@ Provides private Google OAuth 2.0 PKCE authentication, multi-model LLM routing (
 
 ---
 
+## Highlights in v0.2.2 (Visual Proxy Configuration & Persistence)
+
+- **Visual Network Proxy UI**: Added dedicated Network Proxy settings card in the Antigravity settings section, allowing users to bind local proxy endpoints (e.g. `http://127.0.0.1:7890`) without configuring environment variables or TUN mode.
+- **End-to-End Proxy Routing**: Established adaptive priority ladder: `UI manual binding > System environment variables (HTTP_PROXY / HTTPS_PROXY) > Direct connection`. Routes Google OAuth exchange, LLM streaming, and quota queries seamlessly.
+- **Bidirectional RPC & Durable Persistence**: Added `get-proxy` and `set-proxy` RPC endpoints, persisting configurations to `%LOCALAPPDATA%\dsh-tool-antigravity\config.json` across app reloads and restarts.
+- **Stream Cancellation Error Suppression**: Hardened abort handlers to suppress unhandled socket error emissions during user stop actions.
+
+---
+
 ## Highlights in v0.2.1 (Stability & Connection Keep-Alive)
 
 - **Pre-stream Idempotent Network Retry**: Automatically retries transient network interruptions (e.g. connection resets, timeouts, or `502/503/504` errors) once prior to first byte emission (500ms backoff), while preserving strict fail-closed guarantees once generation starts to prevent duplicate billing.
@@ -21,7 +30,6 @@ Provides private Google OAuth 2.0 PKCE authentication, multi-model LLM routing (
 - **Relaxed Stream Timeouts**: Extended stream idle timeout to 120s and total timeout to 600s (10 min), comfortably accommodating extended thinking models like Gemini 3.8 Flash, Gemini 2.5 Pro, and Claude reasoning models.
 - **Unified Credential Storage**: Consolidated the single-account credential storage under `dsh-tool-antigravity/auth.json`.
 - **Hardened Proxy Configuration**: Auto-normalizes proxy URLs without scheme prefix, adds `HTTP_PROXY` fallback, and retains low-level system error causes for streamlined diagnosis.
-
 ---
 
 ## Features

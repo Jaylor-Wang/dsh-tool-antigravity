@@ -382,4 +382,24 @@ describe('Antigravity login RPC', () => {
     })
     expect(JSON.stringify([malformed, sanitized, rejected])).not.toMatch(/secret|callbackUrl|access-token/i)
   })
+
+  it('manages persistent proxy settings via get-proxy and set-proxy RPC endpoints', async () => {
+    const setResult = await request('set-proxy', { proxy: 'http://127.0.0.1:7890' })
+    expect(setResult).toEqual({
+      ok: true,
+      value: { proxy: 'http://127.0.0.1:7890' },
+    })
+
+    const getResult = await request('get-proxy', {})
+    expect(getResult).toEqual({
+      ok: true,
+      value: { proxy: 'http://127.0.0.1:7890' },
+    })
+
+    const clearResult = await request('set-proxy', { proxy: '' })
+    expect(clearResult).toEqual({
+      ok: true,
+      value: { proxy: '' },
+    })
+  })
 })

@@ -36,6 +36,8 @@ export interface AntigravityAuthRpcClient {
   revoke(signal?: AbortSignal): Promise<RpcResult<RevokeActionResult>>
   models(signal?: AbortSignal, force?: boolean): Promise<RpcResult<AntigravityModelCatalogView>>
   usage?(signal?: AbortSignal, force?: boolean): Promise<RpcResult<QuotaStatusView>>
+  getProxy(signal?: AbortSignal): Promise<RpcResult<{ proxy: string }>>
+  setProxy(proxy: string, signal?: AbortSignal): Promise<RpcResult<{ proxy: string }>>
 }
 
 export interface AntigravityAuthConnectionRpc {
@@ -61,6 +63,8 @@ export function createAntigravityAuthRpcClient(rpc: AntigravityAuthConnectionRpc
     revoke: signal => callValidated(rpc, 'revoke', { confirmed: true }, signal, parseRevokeResult),
     models: (signal, force = false) => callValidated(rpc, 'models', { force }, signal, parseModelCatalogResult),
     usage: (signal, force = false) => callValidated(rpc, 'usage', { force }, signal, parseUsageResult),
+    getProxy: signal => callValidated(rpc, 'get-proxy', {}, signal, value => (isRecord(value) ? value as { proxy: string } : undefined)),
+    setProxy: (proxy, signal) => callValidated(rpc, 'set-proxy', { proxy }, signal, value => (isRecord(value) ? value as { proxy: string } : undefined)),
   }
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "dsh-tool-antigravity",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "High-performance, streamlined Antigravity OAuth LLM routing and Nano Banana 2 image generation capability bundle for DeepSeek Harness",
   "type": "module",
   "engines": {

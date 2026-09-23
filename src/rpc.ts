@@ -7,7 +7,7 @@ import type { BootstrapStatusService } from './status.ts'
 import type { QuotaStatusView } from './quota.ts'
 import { isSafeRpcErrorCode, safeRpcErrorMessage } from './rpc-vocabulary.ts'
 import type { AntigravityModelCatalogService } from './model-catalog.ts'
-
+import { getStoredProxy, setStoredProxy, applyProxySetting } from './proxy-config.ts'
 export { ANTIGRAVITY_AUTH_RPC_CHANNEL, ANTIGRAVITY_AUTH_RPC_NAMESPACE } from './rpc-contract.ts'
 
 /** Dispatch closed, value-safe requests; callback URLs are never echoed. */
@@ -59,6 +59,15 @@ export async function handleAntigravityAuthRpc(
     if (endpoint === 'revoke') {
       if (!isRevokePayload(payload)) return badRequest('revoke expects { confirmed: true }')
       return { ok: true, value: await service.revoke(true, signal) }
+    }
+    if (endpoint === 'get-proxy') {
+      return { ok: true, value: { proxy: getStoredProxy() } }
+    }
+    if (endpoint === 'set-proxy') {
+      const proxy = isRecord(payload) && typeof payload.proxy === 'string' ? payload.proxy.trim() : ''
+      setStoredProxy(proxy)
+      applyProxySetting(proxy)
+      return { ok: true, value: { proxy } }
     }
     return badRequest('unknown Antigravity auth endpoint')
   } catch (error) {

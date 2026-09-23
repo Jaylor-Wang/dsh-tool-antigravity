@@ -5,6 +5,7 @@ import { PrivateTransportError } from './private-transport-error.ts'
 import { ANTIGRAVITY_WIRE_ORIGIN } from './wire-identity.ts'
 export { PrivateTransportError } from './private-transport-error.ts'
 export type { PrivateTransportErrorCode } from './private-transport-error.ts'
+export { setExplicitProxy } from './raw-http.ts'
 
 export const DEFAULT_PRIVATE_RESPONSE_HEADER_TIMEOUT_MS = 180_000
 export const DEFAULT_PRIVATE_IDLE_TIMEOUT_MS = 120_000
