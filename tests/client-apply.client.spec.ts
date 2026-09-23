@@ -42,8 +42,12 @@ function bench(isLoopback = true) {
         }
       },
     },
+    configForms: {
+      get: () => undefined,
+    },
     get(service: string) {
       if (service === 'connection') return { isLoopback, rpc: { call } }
+      if (service === 'configForms') return { get: () => undefined }
       throw new Error(`unexpected service: ${service}`)
     },
     effect(effect: () => () => void) {
@@ -70,7 +74,7 @@ function bench(isLoopback = true) {
 
 describe('Antigravity client apply', () => {
   it('declares its services and removes dictionaries, slots, and listeners on teardown', async () => {
-    expect(inject).toEqual(['slots', 'locale', 'connection'])
+    expect(inject).toEqual(['slots', 'locale', 'connection', 'configForms'])
     const b = bench()
 
     expect(b.slots.map(record => record.options)).toEqual([
