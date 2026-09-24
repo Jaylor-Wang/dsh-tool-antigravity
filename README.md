@@ -19,8 +19,9 @@ Provides private Google OAuth 2.0 PKCE authentication, multi-model LLM routing (
 - **DeepSeek Harness v0.1.7-rc.1 Adaptation**: Fully adapted to DSH v0.1.7-rc.1's modernized settings architecture, transitioning image and capability configurations from deprecated `settingsScope` to the new `configForms` pipeline.
 - **Cordis Injection Hardening**: Explicitly injected `configForms` into the Web client service declaration to satisfy Cordis v4 runtime property protection, resolving client initialization halts (`cannot get property "configForms" without inject`).
 - **Guaranteed Web UI Settings Registration**: Hardened sidebar settings contribution logic to register unconditionally across asynchronous bundle lifecycles and service mount timings.
+- **Visual Network Proxy UI**: Added dedicated Network Proxy settings card in the Antigravity settings section, allowing users to bind local proxy endpoints (e.g. `http://127.0.0.1:7890`) without configuring environment variables or TUN mode.
+- **End-to-End Proxy Routing**: Established adaptive priority ladder: `UI manual binding > System environment variables (HTTP_PROXY / HTTPS_PROXY) > Direct connection`. Routes Google OAuth exchange, LLM streaming, and quota queries seamlessly.
 - **Fault-Tolerant Client Boundary**: Encapsulated client bootstrap with defensive error boundaries and fallbacks, preventing auxiliary web view failures from interrupting core DSH startup.
-
 ## Features
 
 ### 1. High-Performance Core Architecture
