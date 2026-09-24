@@ -5,7 +5,7 @@ English | [中文](README.zh.md)
 [![npm version](https://img.shields.io/npm/v/dsh-tool-antigravity.svg?color=blue)](https://www.npmjs.com/package/dsh-tool-antigravity)
 [![license](https://img.shields.io/github/license/Jaylor-Wang/dsh-tool-antigravity.svg)](LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/Jaylor-Wang/dsh-tool-antigravity.svg)](https://github.com/Jaylor-Wang/dsh-tool-antigravity/releases)
-[![Tests](https://img.shields.io/badge/tests-28%20suites%20%7C%20271%20passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-28%20suites%20%7C%20272%20passed-brightgreen.svg)](tests/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Strict%20Types-blue.svg)](tsconfig.json)
 
 High-performance, streamlined Antigravity capability bundle plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH).
@@ -14,23 +14,12 @@ Provides private Google OAuth 2.0 PKCE authentication, multi-model LLM routing (
 
 ---
 
-## Highlights in v0.2.2 (Visual Proxy Configuration & Persistence)
+## Highlights in v0.2.5 (DeepSeek Harness v0.1.7-rc.1 Compatibility)
 
-- **Visual Network Proxy UI**: Added dedicated Network Proxy settings card in the Antigravity settings section, allowing users to bind local proxy endpoints (e.g. `http://127.0.0.1:7890`) without configuring environment variables or TUN mode.
-- **End-to-End Proxy Routing**: Established adaptive priority ladder: `UI manual binding > System environment variables (HTTP_PROXY / HTTPS_PROXY) > Direct connection`. Routes Google OAuth exchange, LLM streaming, and quota queries seamlessly.
-- **Bidirectional RPC & Durable Persistence**: Added `get-proxy` and `set-proxy` RPC endpoints, persisting configurations to `%LOCALAPPDATA%\dsh-tool-antigravity\config.json` across app reloads and restarts.
-- **Stream Cancellation Error Suppression**: Hardened abort handlers to suppress unhandled socket error emissions during user stop actions.
-
----
-
-## Highlights in v0.2.1 (Stability & Connection Keep-Alive)
-
-- **Pre-stream Idempotent Network Retry**: Automatically retries transient network interruptions (e.g. connection resets, timeouts, or `502/503/504` errors) once prior to first byte emission (500ms backoff), while preserving strict fail-closed guarantees once generation starts to prevent duplicate billing.
-- **TCP Socket Keep-Alive & NoDelay**: Configures 15-second TCP keepalive probes and `noDelay` on raw HTTP/1.1 TLS and proxy sockets, preventing local proxies (Clash, Surge, V2Ray) and NAT routers from dropping idle connections during model reasoning pauses.
-- **Relaxed Stream Timeouts**: Extended stream idle timeout to 120s and total timeout to 600s (10 min), comfortably accommodating extended thinking models like Gemini 3.8 Flash, Gemini 2.5 Pro, and Claude reasoning models.
-- **Unified Credential Storage**: Consolidated the single-account credential storage under `dsh-tool-antigravity/auth.json`.
-- **Hardened Proxy Configuration**: Auto-normalizes proxy URLs without scheme prefix, adds `HTTP_PROXY` fallback, and retains low-level system error causes for streamlined diagnosis.
----
+- **DeepSeek Harness v0.1.7-rc.1 Adaptation**: Fully adapted to DSH v0.1.7-rc.1's modernized settings architecture, transitioning image and capability configurations from deprecated `settingsScope` to the new `configForms` pipeline.
+- **Cordis Injection Hardening**: Explicitly injected `configForms` into the Web client service declaration to satisfy Cordis v4 runtime property protection, resolving client initialization halts (`cannot get property "configForms" without inject`).
+- **Guaranteed Web UI Settings Registration**: Hardened sidebar settings contribution logic to register unconditionally across asynchronous bundle lifecycles and service mount timings.
+- **Fault-Tolerant Client Boundary**: Encapsulated client bootstrap with defensive error boundaries and fallbacks, preventing auxiliary web view failures from interrupting core DSH startup.
 
 ## Features
 

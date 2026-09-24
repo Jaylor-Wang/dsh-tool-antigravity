@@ -5,7 +5,7 @@
 [![npm version](https://img.shields.io/npm/v/dsh-tool-antigravity.svg?color=blue)](https://www.npmjs.com/package/dsh-tool-antigravity)
 [![license](https://img.shields.io/github/license/Jaylor-Wang/dsh-tool-antigravity.svg)](LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/Jaylor-Wang/dsh-tool-antigravity.svg)](https://github.com/Jaylor-Wang/dsh-tool-antigravity/releases)
-[![Tests](https://img.shields.io/badge/tests-28%20suites%20%7C%20271%20passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-28%20suites%20%7C%20272%20passed-brightgreen.svg)](tests/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Strict%20Types-blue.svg)](tsconfig.json)
 
 为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) 打造的高性能 Antigravity 核心能力包插件。
@@ -14,23 +14,12 @@
 
 ---
 
-## v0.2.2 版本重要更新 (可视化代理设置与持久化)
+## v0.2.5 版本重要更新 (全面适配 DeepSeek Harness v0.1.7-rc.1)
 
-- **Web UI 可视化网络代理设置**：在 Antigravity 设置面板中新增专属「网络代理设置」卡片，支持用户手动绑定本地代理端口（如 `http://127.0.0.1:7890`），摆脱手动注入系统环境变量或开启全局虚拟网卡的繁琐流程。
-- **全链路底层自适应优先级**：建立清晰代理调度通道：`UI 手动绑定 > 系统环境变量 (HTTP_PROXY / HTTPS_PROXY) > 纯直连`。无论 Google OAuth 换票、模型流式生成还是配额查询，均统一联动。
-- **双向 RPC 专属持久化存储**：新增 `get-proxy` 与 `set-proxy` 双向 RPC 通道，配置持久化落盘至 `%LOCALAPPDATA%\dsh-tool-antigravity\config.json`，跨服务重启、页面重载均自动回填生效。
-- **流式中途中止错误抑制**：修复长连接在用户主动 Stop / 终止会话时底层 socket 销毁触发 Node 未捕获异常的边界情况。
-
----
-
-## v0.2.1 版本重要更新 (稳定性与连接保活增强)
-
-- **前置幂等断线自愈**：在流式生成首字节前遇到瞬时网络异常（如连接重置、超时、`502/503/504` 网关错误）时自动平滑重试 1 次（500ms 退避），杜绝因瞬态链路抖动导致整轮会话中断，严格保持首字节后的 fail-closed 原则避免二次计费。
-- **TCP Socket Keep-Alive & NoDelay**：为底层原生 HTTP/1.1 Socket 注入 15 秒心跳保活与低延迟配置，彻底消除中间 NAT、防火墙以及国内常见本地代理（Clash / Surge / V2Ray 等 127.0.0.1）在模型思考停顿间隙静默掐断长连接的问题。
-- **流式超时阈值放宽**：将流空闲超时（Idle Timeout）提升至 120 秒，总超时（Total Timeout）放宽至 600 秒（10 分钟），充分容纳 Gemini 3.8 Flash、Gemini 2.5 Pro 及 Claude 系列模型的深度推理阶段。
-- **凭据存储统一**：凭据默认持久化路径统归 `C:\Users\<user>\AppData\Local\dsh-tool-antigravity\auth.json`，解决双目录残留与冲突隐患。
-- **代理环境自适应**：支持无协议前缀的代理地址自动规范化补全，支持 `HTTP_PROXY` 环境变量自动降级兜底，异常透传底层系统错误详情。
----
+- **全面适配 DeepSeek Harness v0.1.7-rc.1**：跟进 DSH 核心设置与表单体系重构，将生图与设置配置通道从已废弃的 `settingsScope` 全面迁移至最新的 `configForms` 体系。
+- **Cordis 依赖注入加固**：在 Web 客户端服务声明中显式补齐 `configForms` 依赖注入，满足 Cordis v4 严格属性访问安全检查，根治属性拦截导致的初始化阻断（`cannot get property "configForms" without inject`）。
+- **Web 侧边栏设置项稳定挂载**：重构并保障 Antigravity 设置项在 Web UI 侧边栏中的无条件注册逻辑，杜绝因 Bundle 异步加载时序导致的设置项缺失问题。
+- **前端运行期防御性兜底**：为客户端注入流程建立容错安全边界，确保前端非关键辅助状态异常绝不阻断 DSH Web 主服务正常启动与渲染。
 
 ## 核心特性与架构设计
 
