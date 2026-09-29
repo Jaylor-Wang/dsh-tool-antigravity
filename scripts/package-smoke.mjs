@@ -48,7 +48,7 @@ try {
   }
   for (const [dependency, range] of Object.entries(manifest.peerDependencies ?? {})) {
     if (dependency.startsWith('@deepseek-ai/dsh-') && range !== DSH_PEER_RANGE) {
-      throw new Error(`package smoke: ${dependency} does not declare both verified DSH prerelease ranges`)
+      throw new Error(`package smoke: ${dependency} does not declare an unlocked DSH peer range`)
     }
   }
   if (manifest.peerDependencies?.['@deepseek-ai/cordis'] !== '^4.0.2'
