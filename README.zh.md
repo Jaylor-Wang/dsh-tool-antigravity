@@ -14,12 +14,11 @@
 
 ---
 
-## v0.3.0 版本重要更新 (修复生图开关与动态设置热同步)
+## v0.3.1 版本重要更新 (代理持久化恢复与重连响应强化)
 
-- **Volatile 模式声明**：为生图模块 `Config` 中的 `enabled` 声明 `.volatile()` 动态热更元数据，使 DSH `volatileForm` 表单系统能够完整映射 `antigravity-image` 命名空间至 Web UI。
-- **规范化 Settings 契约**：移除已弃用的 `installSection` 假契约，统一为 DSH 规范的 `settings.configure({ auto: false }, fiber)` 静默注入。
-- **实时响应 `loader/volatile-update`**：捕获热更事件，在前端操作开关时无需重启宿主即时同步生图与多轮编辑工具（`generate_image` / `list_images`）的挂载状态。
-- **深度兼容 Volatile 响应式读取**：新增 `resolveEnabled` 解包逻辑，无缝兼顾 Cordis 响应式 getter 对象与静态 boolean 原生值。
+- **代理拉取连接联动**：在网络代理输入框的状态读取中补齐 `resetTick` 依赖，解决前端在初次加载或重连时序中偶发的代理未填入问题。
+- **单测环境沙箱隔离**：将 RPC 代理配置相关的自动化单测重定向至系统独立临时目录（`tmpdir()`），彻底杜绝单测运行对真实持久化环境配置的误清空。
+- **保留 v0.3.0 全部特性**：生图配置 Volatile 热更、无感工具同步以及底层响应式解包逻辑。
 ## 核心特性与架构设计
 
 ### 1. 高性能底层架构

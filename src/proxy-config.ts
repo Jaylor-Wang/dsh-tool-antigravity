@@ -8,9 +8,19 @@ import { setExplicitProxy } from './raw-http.ts'
 
 export const PROXY_CONFIG_FILE_PATH = join(dirname(defaultAuthStorePath()), 'config.json')
 
+let customConfigFilePath: string | undefined
+
+export function getProxyConfigFile(): string {
+  return customConfigFilePath ?? PROXY_CONFIG_FILE_PATH
+}
+
+export function setCustomProxyConfigFile(path?: string): void {
+  customConfigFilePath = path
+}
+
 export function getStoredProxy(): string {
   try {
-    const raw = readFileSync(PROXY_CONFIG_FILE_PATH, 'utf-8')
+    const raw = readFileSync(getProxyConfigFile(), 'utf-8')
     const data = JSON.parse(raw) as { proxy?: unknown }
     return typeof data?.proxy === 'string' ? data.proxy.trim() : ''
   } catch {
@@ -20,8 +30,9 @@ export function getStoredProxy(): string {
 
 export function setStoredProxy(proxy: string): void {
   try {
-    mkdirSync(dirname(PROXY_CONFIG_FILE_PATH), { recursive: true })
-    writeFileSync(PROXY_CONFIG_FILE_PATH, JSON.stringify({ proxy }), 'utf-8')
+    const file = getProxyConfigFile()
+    mkdirSync(dirname(file), { recursive: true })
+    writeFileSync(file, JSON.stringify({ proxy }), 'utf-8')
   } catch {}
 }
 

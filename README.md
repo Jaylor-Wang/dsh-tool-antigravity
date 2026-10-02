@@ -14,12 +14,11 @@ Provides private Google OAuth 2.0 PKCE authentication, multi-model LLM routing (
 
 ---
 
-## Highlights in v0.3.0 (Interactive Image Toggle & Live Settings Sync)
+## Highlights in v0.3.1 (Proxy Persistence & Reconnect Reactivity)
 
-- **Volatile Image Config Schema**: Declared image capability switch `enabled` as a volatile schema property (`.volatile()`), enabling DSH `volatileForm` to project the `antigravity-image` settings namespace to Web UI.
-- **Contract-Compliant Settings Integration**: Replaced deprecated `installSection` call with standard `settings.configure({ auto: false }, fiber)`.
-- **Live Reactivity via `loader/volatile-update`**: Hooked into volatile updates to immediately mount/unmount image generation and editing tools (`generate_image`, `list_images`) when toggled from the settings panel.
-- **Volatile Getter Adaptability**: Added dynamic unwrap helper (`resolveEnabled`) for transparent compatibility with Cordis reactive getters and static values.
+- **Proxy Fetch Reactivity**: Linked settings proxy retrieval with connection lifecycle `resetTick`, guaranteeing prompt re-fetching whenever the connection initializes or recovers from disconnects.
+- **Isolated Test Suite Storage**: Isolated proxy RPC integration tests into sandboxed temporary directories, fully protecting local environment persistence configurations from unit test interference.
+- **Retains v0.3.0 capabilities**: Volatile image capability switch, dynamic settings sync, and live tool unwrap.
 ## Features
 
 ### 1. High-Performance Core Architecture

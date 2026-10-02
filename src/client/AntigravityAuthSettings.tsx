@@ -76,7 +76,7 @@ export function AntigravityAuthSettings({ rpc, t, subscribe, imageScope }: Antig
       }
     })
     return () => { active = false }
-  }, [rpc])
+  }, [rpc, resetTick])
 
   const saveProxy = async (): Promise<void> => {
     setProxySaving(true)

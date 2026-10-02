@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   createAntigravityAuthRpcClient,
   parseModelCatalogResult,
@@ -7,6 +10,7 @@ import {
 } from '../src/rpc-contract.ts'
 import type { AntigravityAuthConnectionRpc } from '../src/rpc-contract.ts'
 import { handleAntigravityAuthRpc } from '../src/rpc.ts'
+import { setCustomProxyConfigFile } from '../src/proxy-config.ts'
 import { createMemoryAuthStore } from '../src/auth-store.ts'
 import { createBootstrapStatusService } from '../src/bootstrap-service.ts'
 import { createStatusView } from '../src/status.ts'
@@ -384,22 +388,30 @@ describe('Antigravity login RPC', () => {
   })
 
   it('manages persistent proxy settings via get-proxy and set-proxy RPC endpoints', async () => {
-    const setResult = await request('set-proxy', { proxy: 'http://127.0.0.1:7890' })
-    expect(setResult).toEqual({
-      ok: true,
-      value: { proxy: 'http://127.0.0.1:7890' },
-    })
+    const tempDir = await mkdtemp(join(tmpdir(), 'dsh-proxy-test-'))
+    const tempConfig = join(tempDir, 'config.json')
+    setCustomProxyConfigFile(tempConfig)
+    try {
+      const setResult = await request('set-proxy', { proxy: 'http://127.0.0.1:7890' })
+      expect(setResult).toEqual({
+        ok: true,
+        value: { proxy: 'http://127.0.0.1:7890' },
+      })
 
-    const getResult = await request('get-proxy', {})
-    expect(getResult).toEqual({
-      ok: true,
-      value: { proxy: 'http://127.0.0.1:7890' },
-    })
+      const getResult = await request('get-proxy', {})
+      expect(getResult).toEqual({
+        ok: true,
+        value: { proxy: 'http://127.0.0.1:7890' },
+      })
 
-    const clearResult = await request('set-proxy', { proxy: '' })
-    expect(clearResult).toEqual({
-      ok: true,
-      value: { proxy: '' },
-    })
+      const clearResult = await request('set-proxy', { proxy: '' })
+      expect(clearResult).toEqual({
+        ok: true,
+        value: { proxy: '' },
+      })
+    } finally {
+      setCustomProxyConfigFile(undefined)
+      await rm(tempDir, { recursive: true, force: true })
+    }
   })
 })
