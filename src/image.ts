@@ -43,10 +43,19 @@ export const ANTIGRAVITY_IMAGE_ENDPOINT = `${ANTIGRAVITY_WIRE_ORIGIN}/v1internal
 export const ANTIGRAVITY_IMAGE_MODEL = 'antigravity-gemini-3.1-flash-image'
 export const ANTIGRAVITY_IMAGE_SETTINGS_NAMESPACE = 'antigravity-image'
 
-export interface Config extends AntigravityImageSettings {}
+export interface Config {
+  readonly enabled?: boolean | { get(): boolean }
+  readonly model?: string
+  readonly n?: number
+}
 
-export const Config: z<Config> = z.object({
-  enabled: z.boolean().default(true),
+const enabledSchema = z.boolean().default(true)
+const volatileEnabled = typeof (enabledSchema as { volatile?: () => unknown }).volatile === 'function'
+  ? ((enabledSchema as unknown) as { volatile: () => z<boolean> }).volatile()
+  : ((enabledSchema as unknown) as { extra: (k: string, v: unknown) => z<boolean> }).extra('volatile', true)
+
+export const Config = z.object({
+  enabled: volatileEnabled,
   model: z.string().default(ANTIGRAVITY_IMAGE_MODEL),
   n: z.number().step(1).min(1).max(4).default(1),
 })
@@ -336,32 +345,47 @@ function renderList(value: ListResult): ContentBlock[] {
   ]
 }
 
+function resolveEnabled(value: unknown): boolean {
+  if (typeof value === 'boolean') return value
+  if (value && typeof (value as { get?: () => boolean }).get === 'function') {
+    return Boolean((value as { get: () => boolean }).get())
+  }
+  return true
+}
+
 /** Mount tools when a ToolRuntime is available; the tool bodies recheck the credential gate. */
-export function apply(ctx?: Context, config: Config = { enabled: true, model: ANTIGRAVITY_IMAGE_MODEL, n: 1 }): void {
+export function apply(ctx?: Context, config?: Config): void {
   if (ctx === undefined) return
   const candidate = ctx as unknown as {
     tools?: { register: (definition: ToolDefinition) => () => void }
     attachments?: AntigravityImageToolOptions['attachments']
     fs?: AntigravityImageToolOptions['fs']
     get?: (name: string) => unknown
+    fiber?: unknown
+    on?: (event: string, listener: (...args: unknown[]) => void) => () => void
   }
   if (candidate.tools === undefined || candidate.attachments === undefined || candidate.fs === undefined) return
-  let current = (): AntigravityImageSettings => config
+  const isEnabled = (): boolean => resolveEnabled(config?.enabled)
+  const readSettings = (): AntigravityImageSettings => ({
+    enabled: isEnabled(),
+    model: config?.model ?? ANTIGRAVITY_IMAGE_MODEL,
+    n: config?.n ?? 1,
+  })
   let lifecycle: CapabilityLifecycle | undefined
-  ctx.inject(['settings'], (settingsCtx) => {
-    settingsCtx.settings.installSection(ctx, ANTIGRAVITY_IMAGE_SETTINGS_NAMESPACE, Config, config, {
-      setSource: source => { current = source; lifecycle?.sync() },
-      onChange: () => { lifecycle?.sync() },
-    })
+  ctx.inject(['settings'], (settingsCtx: any) => {
+    settingsCtx?.settings?.configure?.({ auto: false }, candidate.fiber)
+  })
+  candidate.on?.('loader/volatile-update', () => {
+    lifecycle?.sync()
   })
   const provided = candidate.get?.('antigravityAuth')
   const auth = isAuthService(provided) ? provided : createAntigravityAuthService()
-  const options: AntigravityImageToolOptions = { auth, attachments: candidate.attachments!, fs: candidate.fs!, settings: () => current() }
+  const options: AntigravityImageToolOptions = { auth, attachments: candidate.attachments!, fs: candidate.fs!, settings: readSettings }
   lifecycle = mountCapabilityLifecycle({
     ctx,
     auth,
     id: 'image',
-    enabled: () => current().enabled,
+    enabled: isEnabled,
     register: () => registerCapabilitySet(
       createAntigravityImageTools(options),
       tool => candidate.tools!.register(tool),

@@ -5,7 +5,7 @@ English | [中文](README.zh.md)
 [![npm version](https://img.shields.io/npm/v/dsh-tool-antigravity.svg?color=blue)](https://www.npmjs.com/package/dsh-tool-antigravity)
 [![license](https://img.shields.io/github/license/Jaylor-Wang/dsh-tool-antigravity.svg)](LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/Jaylor-Wang/dsh-tool-antigravity.svg)](https://github.com/Jaylor-Wang/dsh-tool-antigravity/releases)
-[![Tests](https://img.shields.io/badge/tests-28%20suites%20%7C%20272%20passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-28%20suites%20%7C%20273%20passed-brightgreen.svg)](tests/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Strict%20Types-blue.svg)](tsconfig.json)
 
 High-performance, streamlined Antigravity capability bundle plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH).
@@ -14,10 +14,12 @@ Provides private Google OAuth 2.0 PKCE authentication, multi-model LLM routing (
 
 ---
 
-## Highlights in v0.2.6 (Unlocked DSH Peer Range)
+## Highlights in v0.3.0 (Interactive Image Toggle & Live Settings Sync)
 
-- **DSH peer unlocked to `*`**: All `@deepseek-ai/dsh-*` peerDependencies now use `*`, matching `dsh-tool-lsp`. The dshmarket card shows `DSH *` and DSH 0.2.0-rc.2 no longer needs an exact-version exemption.
-- **Retains v0.2.5 runtime work**: `configForms` injection, sidebar settings registration, visual proxy settings, and end-to-end proxy routing remain in place.
+- **Volatile Image Config Schema**: Declared image capability switch `enabled` as a volatile schema property (`.volatile()`), enabling DSH `volatileForm` to project the `antigravity-image` settings namespace to Web UI.
+- **Contract-Compliant Settings Integration**: Replaced deprecated `installSection` call with standard `settings.configure({ auto: false }, fiber)`.
+- **Live Reactivity via `loader/volatile-update`**: Hooked into volatile updates to immediately mount/unmount image generation and editing tools (`generate_image`, `list_images`) when toggled from the settings panel.
+- **Volatile Getter Adaptability**: Added dynamic unwrap helper (`resolveEnabled`) for transparent compatibility with Cordis reactive getters and static values.
 ## Features
 
 ### 1. High-Performance Core Architecture

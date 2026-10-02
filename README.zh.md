@@ -5,7 +5,7 @@
 [![npm version](https://img.shields.io/npm/v/dsh-tool-antigravity.svg?color=blue)](https://www.npmjs.com/package/dsh-tool-antigravity)
 [![license](https://img.shields.io/github/license/Jaylor-Wang/dsh-tool-antigravity.svg)](LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/Jaylor-Wang/dsh-tool-antigravity.svg)](https://github.com/Jaylor-Wang/dsh-tool-antigravity/releases)
-[![Tests](https://img.shields.io/badge/tests-28%20suites%20%7C%20272%20passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-28%20suites%20%7C%20273%20passed-brightgreen.svg)](tests/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Strict%20Types-blue.svg)](tsconfig.json)
 
 为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) 打造的高性能 Antigravity 核心能力包插件。
@@ -14,10 +14,12 @@
 
 ---
 
-## v0.2.6 版本重要更新 (解锁 DSH 运行时 peer)
+## v0.3.0 版本重要更新 (修复生图开关与动态设置热同步)
 
-- **DSH peer 改为 `*`**：所有 `@deepseek-ai/dsh-*` peerDependencies 从 `^0.1.5-rc.1` 放宽为 `*`，与 `dsh-tool-lsp` 一致。dshmarket 卡片显示 `DSH *`，DSH 0.2.0-rc.2 不再需要精确版本豁免。
-- **保留 v0.2.5 运行时改动**：`configForms` 注入、侧边栏设置挂载、可视化代理设置与全链路代理路由均保留。
+- **Volatile 模式声明**：为生图模块 `Config` 中的 `enabled` 声明 `.volatile()` 动态热更元数据，使 DSH `volatileForm` 表单系统能够完整映射 `antigravity-image` 命名空间至 Web UI。
+- **规范化 Settings 契约**：移除已弃用的 `installSection` 假契约，统一为 DSH 规范的 `settings.configure({ auto: false }, fiber)` 静默注入。
+- **实时响应 `loader/volatile-update`**：捕获热更事件，在前端操作开关时无需重启宿主即时同步生图与多轮编辑工具（`generate_image` / `list_images`）的挂载状态。
+- **深度兼容 Volatile 响应式读取**：新增 `resolveEnabled` 解包逻辑，无缝兼顾 Cordis 响应式 getter 对象与静态 boolean 原生值。
 ## 核心特性与架构设计
 
 ### 1. 高性能底层架构
