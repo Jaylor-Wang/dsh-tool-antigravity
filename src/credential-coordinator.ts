@@ -3,6 +3,7 @@
 import type { AntigravityAuthRecord, AntigravityAuthStore } from './auth-store.ts'
 import { ANTIGRAVITY_CLIENT_ID, ANTIGRAVITY_CLIENT_SECRET } from '@cortexkit/antigravity-auth-core'
 import { isBoundedSafeText } from './safe-text.ts'
+import { scopedHttpsFetch } from './raw-http.ts'
 
 export const ANTIGRAVITY_TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token' as const
 export const ANTIGRAVITY_REVOKE_ENDPOINT = 'https://oauth2.googleapis.com/revoke' as const
@@ -134,8 +135,8 @@ interface CachedCredential {
 
 export function createCredentialCoordinator(options: CredentialCoordinatorOptions): CredentialCoordinator {
   const now = options.now ?? (() => Date.now())
-  const refreshAccessToken = options.refreshToken ?? createGoogleRefreshTransport(options.fetchImpl, now)
-  const revokeGrant = options.revokeGrant ?? createGoogleRevokeTransport(options.fetchImpl)
+  const refreshAccessToken = options.refreshToken ?? createGoogleRefreshTransport(options.fetchImpl ?? scopedHttpsFetch, now)
+  const revokeGrant = options.revokeGrant ?? createGoogleRevokeTransport(options.fetchImpl ?? scopedHttpsFetch)
   const refreshLeadMs = Math.max(0, options.refreshLeadMs ?? DEFAULT_REFRESH_LEAD_MS)
   const operationTimeoutMs = Math.max(1, options.operationTimeoutMs ?? DEFAULT_OPERATION_TIMEOUT_MS)
 
@@ -535,7 +536,7 @@ export function createCredentialCoordinator(options: CredentialCoordinatorOption
 }
 
 export function createGoogleRefreshTransport(
-  fetchImpl: typeof fetch = globalThis.fetch,
+  fetchImpl: typeof fetch = scopedHttpsFetch,
   now: () => number = () => Date.now(),
 ): RefreshAccessToken {
   return async ({ refreshToken, signal }) => {
@@ -580,7 +581,7 @@ export function createGoogleRefreshTransport(
   }
 }
 
-export function createGoogleRevokeTransport(fetchImpl: typeof fetch = globalThis.fetch): RevokeGrant {
+export function createGoogleRevokeTransport(fetchImpl: typeof fetch = scopedHttpsFetch): RevokeGrant {
   return async ({ token, signal }) => {
     let response: Response
     try {

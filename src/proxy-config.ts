@@ -1,8 +1,7 @@
-/** Persistent proxy configuration and global dispatcher management for Antigravity tools. */
+/** Persistent proxy configuration for Antigravity tools. */
 
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { createRequire } from 'node:module'
 import { defaultAuthStorePath } from './auth-store.ts'
 import { setExplicitProxy } from './raw-http.ts'
 
@@ -39,18 +38,4 @@ export function setStoredProxy(proxy: string): void {
 export function applyProxySetting(proxyValue?: string): void {
   const proxy = typeof proxyValue === 'string' && proxyValue.trim().length > 0 ? proxyValue.trim() : undefined
   setExplicitProxy(proxy)
-  try {
-    const req = createRequire(import.meta.url)
-    const { EnvHttpProxyAgent, ProxyAgent, setGlobalDispatcher } = req('undici') as {
-      EnvHttpProxyAgent?: new () => unknown
-      ProxyAgent?: new (url: string) => unknown
-      setGlobalDispatcher?: (dispatcher: unknown) => void
-    }
-    if (proxy && ProxyAgent && setGlobalDispatcher) {
-      const proxyUrl = /^https?:\/\//i.test(proxy) ? proxy : `http://${proxy}`
-      setGlobalDispatcher(new ProxyAgent(proxyUrl))
-    } else if (EnvHttpProxyAgent && setGlobalDispatcher) {
-      setGlobalDispatcher(new EnvHttpProxyAgent())
-    }
-  } catch {}
 }

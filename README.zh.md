@@ -5,7 +5,7 @@
 [![npm version](https://img.shields.io/npm/v/dsh-tool-antigravity.svg?color=blue)](https://www.npmjs.com/package/dsh-tool-antigravity)
 [![license](https://img.shields.io/github/license/Jaylor-Wang/dsh-tool-antigravity.svg)](LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/Jaylor-Wang/dsh-tool-antigravity.svg)](https://github.com/Jaylor-Wang/dsh-tool-antigravity/releases)
-[![Tests](https://img.shields.io/badge/tests-28%20suites%20%7C%20273%20passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-29%20suites%20%7C%20279%20passed-brightgreen.svg)](tests/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Strict%20Types-blue.svg)](tsconfig.json)
 
 为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) 打造的高性能 Antigravity 核心能力包插件。
@@ -14,11 +14,12 @@
 
 ---
 
-## v0.3.1 版本重要更新 (代理持久化恢复与重连响应强化)
+## v0.3.2 版本重要更新 (代理作用域严格隔离与全局零污染)
 
-- **代理拉取连接联动**：在网络代理输入框的状态读取中补齐 `resetTick` 依赖，解决前端在初次加载或重连时序中偶发的代理未填入问题。
-- **单测环境沙箱隔离**：将 RPC 代理配置相关的自动化单测重定向至系统独立临时目录（`tmpdir()`），彻底杜绝单测运行对真实持久化环境配置的误清空。
-- **保留 v0.3.0 全部特性**：生图配置 Volatile 热更、无感工具同步以及底层响应式解包逻辑。
+- **彻底消除全局 Dispatcher 污染（修复 #3）**：移除 `setGlobalDispatcher` 调用，杜绝篡改 Node.js 全局网络调度器，彻底解决导致其他模型 Provider 网络异常或直接断网的问题。
+- **作用域 HTTPS 传输流水线**：基于原生 HTTP/1.1 TLS CONNECT 隧道实现 `scopedHttpsFetch`，在严格遵循显式/环境变量代理及 `NO_PROXY` 白名单的同时，将网络影响完全收敛在插件自身请求中。
+- **OAuth 全流程作用域隔离**：将凭据刷新、撤销及授权码兑换默认切换为插件私有作用域传输，消除任何进程级全局状态残留。
+- **保留 v0.3.1 全部特性**：代理拉取连接联动、单测沙箱持久化隔离与 Volatile 热更。
 ## 核心特性与架构设计
 
 ### 1. 高性能底层架构

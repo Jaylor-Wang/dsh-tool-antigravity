@@ -5,7 +5,7 @@ English | [中文](README.zh.md)
 [![npm version](https://img.shields.io/npm/v/dsh-tool-antigravity.svg?color=blue)](https://www.npmjs.com/package/dsh-tool-antigravity)
 [![license](https://img.shields.io/github/license/Jaylor-Wang/dsh-tool-antigravity.svg)](LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/Jaylor-Wang/dsh-tool-antigravity.svg)](https://github.com/Jaylor-Wang/dsh-tool-antigravity/releases)
-[![Tests](https://img.shields.io/badge/tests-28%20suites%20%7C%20273%20passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-29%20suites%20%7C%20279%20passed-brightgreen.svg)](tests/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Strict%20Types-blue.svg)](tsconfig.json)
 
 High-performance, streamlined Antigravity capability bundle plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH).
@@ -14,11 +14,12 @@ Provides private Google OAuth 2.0 PKCE authentication, multi-model LLM routing (
 
 ---
 
-## Highlights in v0.3.1 (Proxy Persistence & Reconnect Reactivity)
+## Highlights in v0.3.2 (Scoped Proxy Isolation & Zero Cross-Plugin Pollution)
 
-- **Proxy Fetch Reactivity**: Linked settings proxy retrieval with connection lifecycle `resetTick`, guaranteeing prompt re-fetching whenever the connection initializes or recovers from disconnects.
-- **Isolated Test Suite Storage**: Isolated proxy RPC integration tests into sandboxed temporary directories, fully protecting local environment persistence configurations from unit test interference.
-- **Retains v0.3.0 capabilities**: Volatile image capability switch, dynamic settings sync, and live tool unwrap.
+- **Eliminate Global Dispatcher Pollution (Fixes #3)**: Completely removed `setGlobalDispatcher` mutation, ensuring Antigravity proxy configurations remain strictly scoped and never intercept outbound requests from other providers or host harnesses.
+- **Scoped HTTPS Fetch Transport**: Built an isolated `scopedHttpsFetch` pipeline using native HTTP/1.1 TLS CONNECT tunneling that honors explicit and environmental proxy settings and `NO_PROXY` bypasses without touching process-wide network state.
+- **All-Round OAuth Scope Isolation**: Migrated OAuth token exchange, refresh, and revocation to scoped HTTPS fetch transport by default.
+- **Retains v0.3.1 capabilities**: Proxy fetch reactivity, isolated test suite storage, and volatile settings syncing.
 ## Features
 
 ### 1. High-Performance Core Architecture

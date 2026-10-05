@@ -73,13 +73,14 @@ vi.mock('node:tls', async () => {
   }
 })
 
-import { createPrivateTransport, readPrivateText } from '../src/private-transport.ts'
+import { createPrivateTransport, readPrivateText, scopedHttpsFetch, setExplicitProxy } from '../src/private-transport.ts'
 import { ANTIGRAVITY_GENERATE_ENDPOINT } from '../src/llm-adapter.ts'
 
 const proxyEnvironmentKeys = ['NO_PROXY', 'no_proxy', 'HTTPS_PROXY', 'https_proxy', 'ALL_PROXY', 'all_proxy', 'HTTP_PROXY', 'http_proxy'] as const
 const originalProxyEnvironment = Object.fromEntries(proxyEnvironmentKeys.map(key => [key, process.env[key]]))
 
 beforeEach(() => {
+  setExplicitProxy(undefined)
   socketState.request = ''
   socketState.proxyRequest = ''
   socketState.holdProxyResponse = false
@@ -97,6 +98,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  setExplicitProxy(undefined)
   for (const key of proxyEnvironmentKeys) {
     const value = originalProxyEnvironment[key]
     if (value === undefined) delete process.env[key]
@@ -274,5 +276,58 @@ describe('fixed private raw transport', () => {
     })
 
     await expect(readPrivateText(response, { maxBytes: 80 * 1024 })).resolves.toHaveLength(body.length)
+  })
+
+  it('routes scopedHttpsFetch through proxy when proxy is explicitly configured', async () => {
+    delete process.env.NO_PROXY
+    setExplicitProxy('http://proxy.invalid:8080')
+
+    const response = await scopedHttpsFetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      body: new URLSearchParams({ code: 'auth-code' }),
+    })
+
+    expect(response.status).toBe(200)
+    await expect(response.text()).resolves.toBe('hello')
+    expect(socketState.proxyRequest).toContain('CONNECT oauth2.googleapis.com:443 HTTP/1.1\r\n')
+    expect(socketState.request).toContain('POST /token HTTP/1.1\r\n')
+    expect(socketState.request).toContain('host: oauth2.googleapis.com\r\n')
+    expect(socketState.request).toContain('content-type: application/x-www-form-urlencoded;charset=UTF-8\r\n')
+    expect(socketState.request).toContain('code=auth-code')
+  })
+
+  it('bypasses proxy in scopedHttpsFetch when host is excluded by NO_PROXY', async () => {
+    setExplicitProxy('http://proxy.invalid:8080')
+    process.env.NO_PROXY = 'oauth2.googleapis.com'
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementationOnce(async () => new Response('direct-fallback', { status: 200 }))
+
+    const response = await scopedHttpsFetch('https://oauth2.googleapis.com/token')
+
+    expect(fetchSpy).toHaveBeenCalledOnce()
+    expect(socketState.proxyRequest).toBe('')
+    await expect(response.text()).resolves.toBe('direct-fallback')
+  })
+
+  it('handles 204 No Content with null body in scopedHttpsFetch', async () => {
+    delete process.env.NO_PROXY
+    setExplicitProxy('http://proxy.invalid:8080')
+    socketState.response = Buffer.from('HTTP/1.1 204 No Content\r\n\r\n', 'latin1')
+
+    const response = await scopedHttpsFetch('https://oauth2.googleapis.com/revoke', {
+      method: 'POST',
+    })
+
+    expect(response.status).toBe(204)
+    expect(response.body).toBeNull()
+  })
+
+  it('rejects with AbortError when signal is aborted in scopedHttpsFetch', async () => {
+    delete process.env.NO_PROXY
+    setExplicitProxy('http://proxy.invalid:8080')
+    const controller = new AbortController()
+    controller.abort()
+
+    await expect(scopedHttpsFetch('https://oauth2.googleapis.com/token', { signal: controller.signal }))
+      .rejects.toThrowError(/aborted/)
   })
 })

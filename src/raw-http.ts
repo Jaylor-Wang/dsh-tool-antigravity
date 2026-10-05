@@ -429,6 +429,102 @@ export function setExplicitProxy(value: string | undefined): void {
   explicitProxy = typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined
 }
 
+/** Bounded HTTPS fetch implementation that respects explicit/environment proxy without modifying the global dispatcher. */
+export async function scopedHttpsFetch(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): Promise<Response> {
+  const url = typeof input === 'string' || input instanceof URL
+    ? new URL(String(input))
+    : new URL(input.url)
+
+  const proxy = url.protocol === 'https:' ? httpsProxy(url) : undefined
+  if (proxy === undefined) {
+    return globalThis.fetch(input, init)
+  }
+
+  const signal = init?.signal ?? undefined
+  if (isAborted(signal)) {
+    throw new DOMException('This operation was aborted', 'AbortError')
+  }
+
+  const method = (init?.method ?? (typeof input === 'object' && 'method' in input && typeof input.method === 'string' ? input.method : 'GET')).toUpperCase()
+  const headers = new Headers(init?.headers ?? (typeof input === 'object' && 'headers' in input ? input.headers : undefined))
+
+  let bodyBytes: Buffer | undefined
+  if (init?.body !== undefined && init.body !== null) {
+    if (init.body instanceof URLSearchParams) {
+      bodyBytes = Buffer.from(init.body.toString(), 'utf-8')
+      if (!headers.has('content-type')) {
+        headers.set('content-type', 'application/x-www-form-urlencoded;charset=UTF-8')
+      }
+    } else if (typeof init.body === 'string') {
+      bodyBytes = Buffer.from(init.body, 'utf-8')
+    } else if (init.body instanceof Uint8Array || Buffer.isBuffer(init.body)) {
+      bodyBytes = Buffer.from(init.body)
+    } else if (init.body instanceof ArrayBuffer) {
+      bodyBytes = Buffer.from(init.body)
+    }
+  }
+
+  if (bodyBytes !== undefined) {
+    headers.set('content-length', String(bodyBytes.byteLength))
+  } else if (['POST', 'PUT', 'PATCH'].includes(method) && !headers.has('content-length')) {
+    headers.set('content-length', '0')
+  }
+
+  headers.set('host', url.host)
+  headers.set('connection', 'close')
+
+  const timeoutMs = 60_000
+  let socket: tls.TLSSocket
+  try {
+    socket = await connectThroughProxy(proxy, url, timeoutMs, signal)
+  } catch (error) {
+    if (isAborted(signal)) throw new DOMException('This operation was aborted', 'AbortError')
+    throw error
+  }
+
+  let requestHead = `${method} ${url.pathname || '/'}${url.search} HTTP/1.1\r\n`
+  for (const [name, val] of headers.entries()) {
+    requestHead += `${name}: ${val}\r\n`
+  }
+  requestHead += '\r\n'
+
+  const abort = (): void => {
+    socket.destroy()
+  }
+
+  try {
+    if (isAborted(signal)) throw new DOMException('This operation was aborted', 'AbortError')
+    signal?.addEventListener('abort', abort, { once: true })
+    socket.write(Buffer.from(requestHead, 'latin1'))
+    if (bodyBytes !== undefined && bodyBytes.byteLength > 0) {
+      socket.write(bodyBytes)
+    }
+    const { head, leftover } = await waitForHead(socket, timeoutMs, true, signal)
+    const parsed = parseResponseHead(head)
+    const isNoBody = parsed.status === 204 || parsed.status === 205 || parsed.status === 304 || method === 'HEAD'
+    if (isNoBody) {
+      socket.destroy()
+    }
+    const bodyStream = isNoBody ? null : buildResponseBody(socket, leftover, parsed, signal)
+    return new Response(bodyStream, {
+      status: parsed.status,
+      statusText: parsed.statusText,
+      headers: parsed.headers,
+    })
+  } catch (error) {
+    socket.destroy()
+    if (isAborted(signal) || (error instanceof PrivateTransportError && error.code === 'cancelled')) {
+      throw new DOMException('This operation was aborted', 'AbortError')
+    }
+    throw error
+  } finally {
+    signal?.removeEventListener('abort', abort)
+  }
+}
+
 function httpsProxy(url: URL): URL | undefined {
   const noProxy = process.env.NO_PROXY ?? process.env.no_proxy ?? ''
   if (matchesNoProxy(url.hostname, noProxy)) return undefined
