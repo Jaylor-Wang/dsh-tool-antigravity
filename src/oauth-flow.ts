@@ -483,8 +483,49 @@ export function createGoogleTokenExchanger(fetchImpl: typeof fetch = scopedHttps
       accessToken: payload.access_token,
       refreshToken: payload.refresh_token,
       expiresAt: clock.now() + expiresIn * 1000,
-      ...typeof payload.email === 'string' ? { email: payload.email } : {},
+      // Google does not put the address on the token response itself; it carries it in the
+      // `id_token` claims. Reading only `payload.email` therefore always missed, leaving the
+      // account pool unable to tell one signed-in account from another.
+      ...emailFromTokenResponse(payload),
     }
+  }
+}
+
+/**
+ * Extract the account address from a token response, preferring a top-level `email` and
+ * falling back to the `id_token` claims where Google actually puts it.
+ *
+ * Returns an empty object rather than an explicit `undefined` so the optional field is
+ * omitted under `exactOptionalPropertyTypes`.
+ */
+function emailFromTokenResponse(payload: Record<string, unknown>): { email?: string } {
+  if (typeof payload.email === 'string' && payload.email.length > 0) return { email: payload.email }
+  const idToken = payload.id_token
+  if (typeof idToken !== 'string') return {}
+  const claims = decodeIdTokenClaims(idToken)
+  const email = claims?.email
+  return typeof email === 'string' && email.length > 0 ? { email } : {}
+}
+
+/**
+ * Decode the claims segment of a JWT without verifying its signature.
+ *
+ * The token came to us directly from Google over TLS in response to our own exchange, so
+ * the payload is already trusted; only the address is read from it, and only as an
+ * identifier. A malformed token yields `undefined` rather than throwing, because a missing
+ * address must not fail an otherwise valid login.
+ */
+function decodeIdTokenClaims(idToken: string): Record<string, unknown> | undefined {
+  const segments = idToken.split('.')
+  if (segments.length !== 3) return undefined
+  const encoded = segments[1]
+  if (encoded === undefined || encoded.length === 0 || encoded.length > 16 * 1024) return undefined
+  try {
+    const decoded = Buffer.from(encoded, 'base64url').toString('utf8')
+    const parsed: unknown = JSON.parse(decoded)
+    return isRecord(parsed) ? parsed : undefined
+  } catch {
+    return undefined
   }
 }
 
