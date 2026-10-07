@@ -3,6 +3,7 @@
 import type { ConnectionRpcResult as RpcResult } from '@deepseek-ai/dsh-client-connection/client'
 import { ANTIGRAVITY_PLUGIN_ID, CAPABILITY_ROW_IDS } from './status.ts'
 import type {
+  AccountSummary,
   AntigravityStatusView,
   CapabilityGateReasonCode,
   CapabilityGateState,
@@ -13,6 +14,7 @@ import type {
   LoginStatusView,
   RiskAcknowledgementResult,
 } from './status.ts'
+import type { AccountOperationResult } from './auth-service.ts'
 import { isLoginErrorCode, isLoginPhase } from './login-types.ts'
 import type { CredentialErrorCode, CredentialState, CredentialStatusView, RevokeActionResult, RevokeErrorCode, RevokeState, RevokeStatusView } from './credential-coordinator.ts'
 import type { QuotaGroupView, QuotaState, QuotaStatusView, QuotaWindowKind } from './quota.ts'
@@ -34,6 +36,8 @@ export interface AntigravityAuthRpcClient {
   cancelLogin(signal?: AbortSignal): Promise<RpcResult<LoginActionResult>>
   logout(signal?: AbortSignal): Promise<RpcResult<{ state: 'logged-out' }>>
   revoke(signal?: AbortSignal): Promise<RpcResult<RevokeActionResult>>
+  selectAccount?(handle: string, signal?: AbortSignal): Promise<RpcResult<AccountOperationResult>>
+  removeAccount?(handle: string, signal?: AbortSignal): Promise<RpcResult<AccountOperationResult>>
   models(signal?: AbortSignal, force?: boolean): Promise<RpcResult<AntigravityModelCatalogView>>
   usage?(signal?: AbortSignal, force?: boolean): Promise<RpcResult<QuotaStatusView>>
   getProxy(signal?: AbortSignal): Promise<RpcResult<{ proxy: string }>>
@@ -61,6 +65,8 @@ export function createAntigravityAuthRpcClient(rpc: AntigravityAuthConnectionRpc
     cancelLogin: signal => callValidated(rpc, 'cancel', {}, signal, parseActionResult),
     logout: signal => callValidated(rpc, 'logout', {}, signal, parseLogoutResult),
     revoke: signal => callValidated(rpc, 'revoke', { confirmed: true }, signal, parseRevokeResult),
+    selectAccount: (handle, signal) => callValidated(rpc, 'select-account', { id: handle }, signal, parseAccountOperationResult),
+    removeAccount: (handle, signal) => callValidated(rpc, 'remove-account', { id: handle }, signal, parseAccountOperationResult),
     models: (signal, force = false) => callValidated(rpc, 'models', { force }, signal, parseModelCatalogResult),
     usage: (signal, force = false) => callValidated(rpc, 'usage', { force }, signal, parseUsageResult),
     getProxy: signal => callValidated(rpc, 'get-proxy', {}, signal, value => (isRecord(value) ? value as { proxy: string } : undefined)),
@@ -102,6 +108,19 @@ function sanitizeFailure(result: Extract<RpcResult<unknown>, { readonly ok: fals
       details: {},
     },
   }
+}
+
+/**
+ * Upper bound on how many pooled accounts the settings UI will accept.
+ *
+ * A bound is required because the list crosses into the browser: an unbounded array from a
+ * corrupt store would be rendered rather than rejected.
+ */
+const MAX_ACCOUNT_SUMMARIES = 64
+
+/** A finite, non-negative number; used for the optional numeric account fields. */
+function isSafeNonNegativeNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
 }
 
 function isSafeErrorDetails(value: unknown): boolean {
@@ -175,6 +194,14 @@ export function parseStatusResult(value: unknown): AntigravityStatusView | undef
   return parseStatus(value.status)
 }
 
+/** Validate the closed result of an account-list operation. */
+function parseAccountOperationResult(value: unknown): AccountOperationResult | undefined {
+  if (!isRecord(value) || !hasAllowedKeys(value, ['state'])) return undefined
+  const state = value.state
+  if (state !== 'selected' && state !== 'removed' && state !== 'unknown-account') return undefined
+  return { state }
+}
+
 function parseStatus(value: unknown): AntigravityStatusView | undefined {
   if (!isRecord(value)
     || !hasAllowedKeys(value, [
@@ -185,6 +212,7 @@ function parseStatus(value: unknown): AntigravityStatusView | undefined {
       'riskAcknowledgementRequired',
       'riskAcknowledged',
       'login',
+      'accounts',
       'credential',
       'revoke',
       'capabilities',
@@ -192,10 +220,17 @@ function parseStatus(value: unknown): AntigravityStatusView | undefined {
     || value.pluginId !== ANTIGRAVITY_PLUGIN_ID
     || value.phase !== 'bootstrap'
     || value.privateSelfUse !== true
-    || value.singleAccount !== true
+    || typeof value.singleAccount !== 'boolean'
     || value.riskAcknowledgementRequired !== true
     || typeof value.riskAcknowledged !== 'boolean'
+    || !Array.isArray(value.accounts)
     || !Array.isArray(value.capabilities)) return undefined
+
+  const accounts = parseAccounts(value.accounts)
+  if (accounts === undefined) return undefined
+  // The two shapes must agree, or the UI would render a pool it cannot act on.
+  if (value.singleAccount === true && accounts.length > 0) return undefined
+  if (value.singleAccount === false && accounts.length === 0) return undefined
 
   const login = parseLoginStatus(value.login)
   if (login === undefined) return undefined
@@ -217,14 +252,49 @@ function parseStatus(value: unknown): AntigravityStatusView | undefined {
     pluginId: ANTIGRAVITY_PLUGIN_ID,
     phase: 'bootstrap',
     privateSelfUse: true,
-    singleAccount: true,
+    singleAccount: value.singleAccount,
     riskAcknowledgementRequired: true,
     riskAcknowledged: value.riskAcknowledged,
     login,
+    accounts,
     ...(credential === undefined ? {} : { credential }),
     ...(revoke === undefined ? {} : { revoke }),
     capabilities,
   }
+}
+
+/**
+ * Validate the account list the Host published.
+ *
+ * Bounded and closed-keyed like every other value crossing this boundary: the UI renders
+ * whatever survives here, so an unexpected field is a contract violation rather than
+ * something to ignore.
+ */
+function parseAccounts(value: unknown[]): readonly AccountSummary[] | undefined {
+  if (value.length > MAX_ACCOUNT_SUMMARIES) return undefined
+  const seen = new Set<string>()
+  const accounts: AccountSummary[] = []
+  for (const entry of value) {
+    if (!isRecord(entry)
+      || !hasAllowedKeys(entry, ['id', 'email', 'active', 'coolingUntil', 'failureCount'])
+      || !isBoundedSafeText(entry.id, 128)
+      || typeof entry.active !== 'boolean'
+      || seen.has(entry.id)) return undefined
+    if (entry.email !== undefined && !isBoundedSafeText(entry.email, 320)) return undefined
+    if (entry.coolingUntil !== undefined && !isSafeNonNegativeNumber(entry.coolingUntil)) return undefined
+    if (entry.failureCount !== undefined && !isSafeNonNegativeNumber(entry.failureCount)) return undefined
+    seen.add(entry.id)
+    accounts.push({
+      id: entry.id,
+      ...(entry.email === undefined ? {} : { email: entry.email }),
+      active: entry.active,
+      ...(entry.coolingUntil === undefined ? {} : { coolingUntil: entry.coolingUntil }),
+      ...(entry.failureCount === undefined ? {} : { failureCount: entry.failureCount }),
+    })
+  }
+  // At most one account can be the one a request currently resolves to.
+  if (accounts.filter(account => account.active).length > 1) return undefined
+  return accounts
 }
 
 function parseCredentialStatus(value: unknown): CredentialStatusView | undefined {

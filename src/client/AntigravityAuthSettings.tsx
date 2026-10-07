@@ -1,6 +1,6 @@
 /** Settings shell for value-safe Antigravity login status. */
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, useTransition } from 'react'
 import type { ReactNode } from 'react'
 import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { AntigravityAuthRpcClient } from '../rpc-contract.ts'
@@ -14,6 +14,7 @@ import type {
 } from '../status.ts'
 import type { AntigravityAuthKey } from './locales.ts'
 import { ensureSettingsStyles } from './styles.ts'
+import { AccountList } from './AccountList.tsx'
 
 export interface AntigravityAuthSettingsProps {
   rpc: AntigravityAuthRpcClient
@@ -58,6 +59,12 @@ export function AntigravityAuthSettings({ rpc, t, subscribe, imageScope }: Antig
   const [proxySaving, setProxySaving] = useState(false)
   const [proxyMessage, setProxyMessage] = useState('')
   const [resetTick, setResetTick] = useState(0)
+  /**
+   * The account list refreshes after an operation without tearing down what is on screen.
+   * Marking the reload as a transition keeps the already-updated rows mounted while the
+   * authoritative status arrives, so switching an account does not flash the panel.
+   */
+  const [, startStatusTransition] = useTransition()
   const statusGeneration = useRef(0)
   const quotaGeneration = useRef(0)
   const unmountSignal = useUnmountSignal()
@@ -284,6 +291,26 @@ export function AntigravityAuthSettings({ rpc, t, subscribe, imageScope }: Antig
             t={t}
           />
 
+          {/* Which accounts exist and which one is in use. The Host reports a pool only
+              when multi-account is enabled, so the single-account card is unchanged. */}
+          {status === null ? null : (
+            <>
+              <h3 className="agy-account-section-title">{t('accountsTitle')}</h3>
+              <p className="agy-card-subtext">{t('accountsIntro')}</p>
+              <AccountList
+                accounts={status.accounts}
+                singleAccount={status.singleAccount}
+                t={t}
+                rpc={rpc}
+                onChanged={() => {
+                  // A low-priority refresh: the row already shows its new state, so the list
+                  // must not unmount or flash while the authoritative copy arrives.
+                  startStatusTransition(() => { void load(unmountSignal(), true) })
+                }}
+              />
+            </>
+          )}
+
           <div className="agy-action-row">
             {status?.login.phase === 'pending' && typeof status.login.authorizationUrl === 'string' ? (
               <>
@@ -300,7 +327,14 @@ export function AntigravityAuthSettings({ rpc, t, subscribe, imageScope }: Antig
               </button>
             )}
 
-            {status?.credential?.configured ? (
+            {/*
+              Local logout is hidden once the install runs a pool: it only removes the active
+              account, which the per-row "Remove account" control already does with an
+              explicit target. Showing both made the same action look like two different
+              ones. The single-account install keeps it, being the only way to clear its one
+              account without revoking the grant.
+            */}
+            {status?.credential?.configured && status.singleAccount ? (
               <button className="agy-btn agy-btn-outline" type="button" disabled={actionBusy} onClick={() => { void logout() }}>
                 {t('logout')}
               </button>

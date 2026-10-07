@@ -16,7 +16,8 @@ function idleStatus(): AntigravityStatusView {
     riskAcknowledgementRequired: true,
     riskAcknowledged: false,
     login: { phase: 'idle', configured: false, projectAvailable: false },
-    capabilities: [],
+    accounts: [],
+  capabilities: [],
   }
 }
 
@@ -34,7 +35,8 @@ function configuredStatus(): AntigravityStatusView {
       projectAvailable: true,
       maskedEmail: 'z***@gmail.com',
     },
-    capabilities: [
+    accounts: [],
+  capabilities: [
       { id: 'auth-llm', state: 'available', reasonCode: 'capability-ready' },
       { id: 'image', state: 'disabled', reasonCode: 'gate-not-run' },
     ],
@@ -56,7 +58,8 @@ function pendingStatus(): AntigravityStatusView {
       authorizationUrl: AUTHORIZATION_URL,
       expiresAt: '2026-09-07T09:00:00.000Z',
     },
-    capabilities: [],
+    accounts: [],
+  capabilities: [],
   }
 }
 

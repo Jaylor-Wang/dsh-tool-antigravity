@@ -47,7 +47,8 @@ describe('Antigravity login RPC', () => {
           login: { phase: 'idle', configured: false, projectAvailable: false },
           credential: { state: 'logged-out', configured: false },
           revoke: { state: 'idle' },
-          capabilities: [
+          accounts: [],
+        capabilities: [
             { id: 'auth-llm', state: 'disabled', reasonCode: 'unauthenticated' },
             { id: 'image', state: 'disabled', reasonCode: 'unauthenticated' },
           ],

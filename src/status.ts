@@ -53,14 +53,41 @@ export interface CapabilityGateStatus {
   readonly reasonCode: CapabilityGateReasonCode
 }
 
+/**
+ * One signed-in account as the settings UI is allowed to see it.
+ *
+ * Deliberately value-safe: the address is masked, and the identity tag is a hash, so this
+ * crosses the Host/browser boundary without carrying anything that identifies the account
+ * on its own. No token, no refresh token, no raw address.
+ */
+export interface AccountSummary {
+  /** Opaque handle the UI uses to address this account in an operation. */
+  readonly id: string
+  /** Masked address for display, or absent when the account predates identity capture. */
+  readonly email?: string
+  /** True for the account a credential request would currently resolve to. */
+  readonly active: boolean
+  /** Epoch ms until which rotation skips this account; absent when it is ready. */
+  readonly coolingUntil?: number
+  /** Consecutive rotation failures, so the UI can show a struggling account. */
+  readonly failureCount?: number
+}
+
 export interface AntigravityStatusView {
   readonly pluginId: typeof ANTIGRAVITY_PLUGIN_ID
   readonly phase: 'bootstrap'
   readonly privateSelfUse: true
-  readonly singleAccount: true
+  /**
+   * True only while the install runs the single-record store. When the account pool is
+   * enabled this is false and `accounts` carries the pool, so the UI can render either
+   * shape from one contract.
+   */
+  readonly singleAccount: boolean
   readonly riskAcknowledgementRequired: true
   readonly riskAcknowledged: boolean
   readonly login: LoginStatusView
+  /** Every signed-in account, in pool order. Empty for the single-record store. */
+  readonly accounts: readonly AccountSummary[]
   /** Credential state is value-safe; tokens and grant errors never cross this boundary. */
   readonly credential?: CredentialStatusView
   readonly revoke?: RevokeStatusView
@@ -103,15 +130,20 @@ export function createStatusView(
   credential?: CredentialStatusView,
   revoke?: RevokeStatusView,
   gates: CapabilityGateEvidence = {},
+  accounts?: readonly AccountSummary[],
 ): AntigravityStatusView {
+  const pool = accounts === undefined ? undefined : Object.freeze(accounts.map(account => Object.freeze({ ...account })))
   return Object.freeze({
     pluginId: ANTIGRAVITY_PLUGIN_ID,
     phase: 'bootstrap',
     privateSelfUse: true,
-    singleAccount: true,
+    // The pool is authoritative when present: an install running it is no longer
+    // single-account even if only one account happens to be signed in.
+    singleAccount: pool === undefined,
     riskAcknowledgementRequired: true,
     riskAcknowledged,
     login: Object.freeze({ ...login }),
+    accounts: pool ?? Object.freeze([]),
     ...(credential === undefined ? {} : { credential: Object.freeze({ ...credential }) }),
     ...(revoke === undefined ? {} : { revoke: Object.freeze({ ...revoke }) }),
     capabilities: Object.freeze(capabilitiesFor(login, gates).map(capability => Object.freeze({ ...capability }))),

@@ -656,6 +656,106 @@ export const SETTINGS_CSS = `
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
+
+  .agy-account-section-title {
+    margin: 18px 0 4px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--dsw-alias-label-primary, #18181b);
+  }
+
+  .agy-accounts {
+    margin-top: 8px;
+  }
+
+  .agy-account-list {
+    list-style: none;
+    margin: 8px 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .agy-account-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.1));
+    border-radius: 10px;
+    background: var(--dsw-alias-bg-layer-2, rgba(0, 0, 0, 0.02));
+  }
+
+  .agy-account-row[data-active='true'] {
+    border-color: var(--dsw-alias-brand-primary, #16a34a);
+    background: var(--dsw-alias-bg-layer-3, rgba(22, 163, 74, 0.06));
+  }
+
+  .agy-account-identity {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .agy-account-email {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--dsw-alias-label-primary, #18181b);
+    overflow-wrap: anywhere;
+  }
+
+  .agy-account-state {
+    font-size: 12px;
+    color: var(--dsw-alias-label-secondary, #71717a);
+  }
+
+  .agy-account-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .agy-account-confirm {
+    flex-basis: 100%;
+    margin: 0;
+    font-size: 12px;
+    color: var(--dsw-alias-label-secondary, #71717a);
+  }
+
+  .agy-btn-small {
+    padding: 4px 10px;
+    font-size: 12px;
+  }
+
+  .agy-btn-danger {
+    background: transparent;
+    color: var(--dsw-alias-label-error, #dc2626);
+    border: 1px solid var(--dsw-alias-border-error, rgba(220, 38, 38, 0.4));
+  }
+
+
+  /* The active account is marked by border and background rather than a reorder, so the
+     rows never move; only the highlight travels. Animating the two colours keeps the
+     switch perceptible without the layout jump a reorder would cause. */
+  .agy-account-row {
+    transition: border-color 160ms ease, background-color 160ms ease;
+  }
+
+  .agy-account-row[data-active='true'] .agy-account-email {
+    color: var(--dsw-alias-brand-primary, #16a34a);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .agy-account-row {
+      transition: none;
+    }
+  }
+
 `
 
 const STYLE_ELEMENT_ID = 'dsh-antigravity-auth-styles'

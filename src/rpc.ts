@@ -4,6 +4,7 @@ import type { ConnectionRpcResult as RpcResult } from '@deepseek-ai/dsh-client-c
 import { OAuthFlowError } from './oauth-flow.ts'
 import { CredentialOperationError, credentialErrorMessage } from './credential-coordinator.ts'
 import type { BootstrapStatusService } from './status.ts'
+import type { AccountOperationResult } from './auth-service.ts'
 import type { QuotaStatusView } from './quota.ts'
 import { isSafeRpcErrorCode, safeRpcErrorMessage } from './rpc-vocabulary.ts'
 import type { AntigravityModelCatalogService } from './model-catalog.ts'
@@ -12,7 +13,11 @@ export { ANTIGRAVITY_AUTH_RPC_CHANNEL, ANTIGRAVITY_AUTH_RPC_NAMESPACE } from './
 
 /** Dispatch closed, value-safe requests; callback URLs are never echoed. */
 export async function handleAntigravityAuthRpc(
-  service: Pick<BootstrapStatusService, 'status' | 'acknowledgeRisk' | 'startLogin' | 'cancelLogin' | 'logout' | 'revoke'> & { usage?: (signal?: AbortSignal, force?: boolean) => Promise<QuotaStatusView> },
+  service: Pick<BootstrapStatusService, 'status' | 'acknowledgeRisk' | 'startLogin' | 'cancelLogin' | 'logout' | 'revoke'> & {
+    usage?: (signal?: AbortSignal, force?: boolean) => Promise<QuotaStatusView>
+    selectAccount?: (handle: string) => Promise<AccountOperationResult>
+    removeAccount?: (handle: string) => Promise<AccountOperationResult>
+  },
   endpoint: string,
   payload: unknown,
   signal?: AbortSignal,
@@ -24,6 +29,16 @@ export async function handleAntigravityAuthRpc(
     if (endpoint === 'status') {
       if (!isEmptyRecord(payload)) return badRequest('status expects an empty payload')
       return { ok: true, value: { status: await service.status() } }
+    }
+    if (endpoint === 'select-account') {
+      if (!isAccountHandlePayload(payload)) return badRequest('select-account expects { id: string }')
+      if (service.selectAccount === undefined) return badRequest('account selection is unavailable')
+      return { ok: true, value: await service.selectAccount(payload.id) }
+    }
+    if (endpoint === 'remove-account') {
+      if (!isAccountHandlePayload(payload)) return badRequest('remove-account expects { id: string }')
+      if (service.removeAccount === undefined) return badRequest('account removal is unavailable')
+      return { ok: true, value: await service.removeAccount(payload.id) }
     }
     if (endpoint === 'models') {
       if (!isRefreshPayload(payload)) return badRequest('models expects {} or { force: boolean }')
@@ -109,6 +124,20 @@ function isRefreshPayload(value: unknown): value is { force?: boolean } {
   return isRecord(value)
     && Object.keys(value).every(key => key === 'force')
     && (value.force === undefined || typeof value.force === 'boolean')
+}
+
+/**
+ * The account handle payload is closed to a single bounded string.
+ *
+ * The handle is an opaque hash the Host produced, so anything outside the shape it
+ * emits is a malformed request rather than an account that happens to be unknown.
+ */
+function isAccountHandlePayload(value: unknown): value is { id: string } {
+  return isRecord(value)
+    && Object.keys(value).length === 1
+    && typeof value.id === 'string'
+    && value.id.length > 0
+    && value.id.length <= 128
 }
 
 function isAcknowledgement(value: unknown): value is { acknowledge: true } {

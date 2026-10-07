@@ -44,7 +44,7 @@ describe('bootstrap lifecycle boundary', () => {
 
     expect(fetch).not.toHaveBeenCalled()
     expect(setTimeout).not.toHaveBeenCalled()
-    expect(handle).toHaveBeenCalledTimes(11)
+    expect(handle).toHaveBeenCalledTimes(13)
     expect(handle.mock.calls[0]).toHaveLength(1)
     expect(handle.mock.calls[0]?.[0].path).toBe('/api/antigravity-auth/status')
 
@@ -69,7 +69,7 @@ describe('bootstrap lifecycle boundary', () => {
 
     applyAuth({ inject } as never)
 
-    expect(handle).toHaveBeenCalledTimes(11)
+    expect(handle).toHaveBeenCalledTimes(13)
     const route = handle.mock.calls[0]![0]
     const response = await route.fetch(new Request('http://dsh.test' + route.path, {
       method: 'POST', headers: { 'content-type': 'application/json' },
@@ -95,12 +95,12 @@ describe('bootstrap lifecycle boundary', () => {
     try {
       applyAuth(ctx)
       await new Promise<void>(resolve => setImmediate(resolve))
-      expect(handle).toHaveBeenCalledTimes(11)
+      expect(handle).toHaveBeenCalledTimes(13)
     } finally {
       await ctx.fiber.dispose()
       await unprovide()
     }
-    expect(dispose).toHaveBeenCalledTimes(11)
+    expect(dispose).toHaveBeenCalledTimes(13)
   })
 
   it('registers the public LLM adapter only while authenticated Gate 0/L evidence passes', async () => {
