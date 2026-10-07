@@ -97,6 +97,15 @@ export interface LogoutResult {
   readonly state: 'logged-out'
 }
 
+export interface RefreshFailureReport {
+  /** This plugin's error code, used by the rotation policy to classify the failure. */
+  readonly message: string
+  /** HTTP status the failure corresponds to, when one is known. */
+  readonly status?: number
+  readonly reason?: string
+  readonly retryAfterMs?: number | null
+}
+
 export interface CredentialCoordinatorOptions {
   readonly store: AntigravityAuthStore
   readonly now?: () => number
@@ -105,11 +114,24 @@ export interface CredentialCoordinatorOptions {
   readonly refreshToken?: RefreshAccessToken
   readonly revokeGrant?: RevokeGrant
   readonly fetchImpl?: typeof fetch
+  /**
+   * Notified when a refresh fails, so a multi-account pool can rest the account and
+   * rotate. Omitted for the single-account store, which has nowhere to rotate to.
+   */
+  readonly onRefreshFailure?: (report: RefreshFailureReport) => Promise<unknown> | unknown
 }
 
 export interface CredentialCoordinator {
   credential(signal?: AbortSignal, options?: { readonly forceRefresh?: boolean }): Promise<HostCredential | undefined>
   replaceFromLogin(credential: HostCredential, record: AntigravityAuthRecord): void
+  /**
+   * Drop the cached access token without touching stored credentials.
+   *
+   * Used when the pool changes underneath the coordinator — the active account removed or
+   * repointed — so the next request cannot serve a token belonging to an account that is no
+   * longer selected.
+   */
+  invalidateCache(): void
   status(): Promise<CredentialStatusView>
   revokeStatus(): RevokeStatusView
   logout(): Promise<LogoutResult>
@@ -139,6 +161,7 @@ export function createCredentialCoordinator(options: CredentialCoordinatorOption
   const revokeGrant = options.revokeGrant ?? createGoogleRevokeTransport(options.fetchImpl ?? scopedHttpsFetch)
   const refreshLeadMs = Math.max(0, options.refreshLeadMs ?? DEFAULT_REFRESH_LEAD_MS)
   const operationTimeoutMs = Math.max(1, options.operationTimeoutMs ?? DEFAULT_OPERATION_TIMEOUT_MS)
+  const onRefreshFailure = options.onRefreshFailure
 
   let cached: CachedCredential | undefined
   let observedRevision = 0
@@ -194,6 +217,14 @@ export function createCredentialCoordinator(options: CredentialCoordinatorOption
       revokeStatus = { state: 'idle' }
       refreshFlight = undefined
       revokeFlight = undefined
+    },
+
+    invalidateCache: () => {
+      if (disposed) return
+      cached = undefined
+      // The stored record is untouched: this only forgets the in-flight access token, so a
+      // subsequent call re-reads the pool and refreshes against whatever it now selects.
+      lastRefreshAt = undefined
     },
 
     status: async () => {
@@ -519,6 +550,33 @@ export function createCredentialCoordinator(options: CredentialCoordinatorOption
     state = code === 'invalid-grant' ? 're-login-required' : 'refresh-failed'
     errorCode = code
     cached = undefined
+    // Tell the pool this account failed so the next `read()` can pick a different one.
+    // Deliberately not awaited and never allowed to reject: rotation is an optimisation,
+    // and a rotation failure must not replace the real credential error the caller sees.
+    reportFailure(error)
+  }
+
+  /**
+   * Forward one refresh failure to the rotation hook, if one was provided.
+   *
+   * Fire-and-forget by design. The credential result the caller observes must stay the
+   * provider error; whether the pool managed to bench the account is bookkeeping.
+   */
+  function reportFailure(error: unknown): void {
+    if (onRefreshFailure === undefined) return
+    const code = error instanceof CredentialOperationError ? error.code : 'network'
+    // Map this plugin's error codes back onto the HTTP statuses the rotation policy
+    // classifies from. `exactOptionalPropertyTypes` forbids passing an explicit
+    // `undefined`, so the status is spread in only when it is known.
+    const status = code === 'rate-limited' ? 429 : code === 'server-error' ? 503 : code === 'invalid-grant' ? 400 : undefined
+    try {
+      void Promise.resolve(onRefreshFailure({
+        message: code,
+        ...(status === undefined ? {} : { status }),
+      })).catch(() => {})
+    } catch {
+      // A throwing hook is a bug in the caller, not a credential failure.
+    }
   }
 
   function sameLineage(left: AntigravityAuthRecord, right: AntigravityAuthRecord): boolean {

@@ -23,6 +23,11 @@ export const inject = ['llm', 'attachments']
 
 export interface AntigravityAuthConfig {
   proxy?: string
+  /**
+   * Sign in several accounts and rotate between them on quota exhaustion. Off by default
+   * so existing installs keep their single-account file layout until they opt in.
+   */
+  multiAccount?: boolean
 }
 
 /** Mount the Host-only OAuth service and its guarded account RPC channel. */
@@ -36,6 +41,7 @@ export function apply(ctx: Context, config: AntigravityAuthConfig = {}): void {
   const service = createAntigravityAuthService({
     storePath: defaultAuthStorePath(),
     autoActivateGates: true,
+    multiAccount: config.multiAccount === true,
   })
   // Account-control activation for the slash command. A terminal composition
   // composes no public WebServer, so the command starts enabled (local-only
@@ -69,7 +75,7 @@ export function apply(ctx: Context, config: AntigravityAuthConfig = {}): void {
     return registerAccountRoutes(
       connectionCtx.connection,
       ANTIGRAVITY_AUTH_RPC_NAMESPACE,
-      ['status', 'models', 'usage', 'acknowledge-risk', 'login', 'cancel', 'cancel-login', 'logout', 'revoke', 'get-proxy', 'set-proxy'],
+      ['status', 'models', 'usage', 'select-account', 'remove-account', 'acknowledge-risk', 'login', 'cancel', 'cancel-login', 'logout', 'revoke', 'get-proxy', 'set-proxy'],
       guard.handler,
     )
   })
@@ -94,6 +100,8 @@ export function apply(ctx: Context, config: AntigravityAuthConfig = {}): void {
 }
 
 export * from './auth-service.ts'
+export * from './auth-store-pool.ts'
+export * from './rotation-policy.ts'
 export * from './credential-coordinator.ts'
 export * from './rpc-contract.ts'
 export * from './status.ts'

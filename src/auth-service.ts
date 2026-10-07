@@ -1,7 +1,10 @@
 /** Host-side Antigravity risk gate, OAuth coordinator, and credential commit boundary. */
 
+import { randomUUID, createHash } from 'node:crypto'
 import type { AntigravityAuthRecord, AntigravityAuthStore } from './auth-store.ts'
 import { createAuthStore, defaultAuthStorePath } from './auth-store.ts'
+import { createAuthStorePool, defaultAuthPoolPath, effectiveFailureCount, emailTagFor, type AuthStorePool } from './auth-store-pool.ts'
+import { decideRotation } from './rotation-policy.ts'
 import { createCredentialCoordinator, type CredentialCoordinator, type CredentialCoordinatorOptions, type HostCredential } from './credential-coordinator.ts'
 import { createOAuthFlow, OAuthFlowError } from './oauth-flow.ts'
 import type {
@@ -33,6 +36,18 @@ import {
   type CapabilityGateRegistry,
 } from './capability-gates.ts'
 import type { CapabilityGateOutcome, CapabilityRowId } from './status.ts'
+import type { AccountSummary } from './status.ts'
+
+/**
+ * Opaque handle for one pooled account.
+ *
+ * The UI needs to name an account to act on it, but the lineage is the fence every other
+ * decision keys on, so it is not handed to the browser. A hash is stable across status
+ * reads, which is all the UI requires.
+ */
+export function accountHandle(lineage: string): string {
+  return createHash('sha256').update(`dsh-tool-antigravity/handle/${lineage}`).digest('hex').slice(0, 32)
+}
 
 export interface AntigravityAuthServiceOptions {
   readonly store?: AntigravityAuthStore
@@ -45,9 +60,23 @@ export interface AntigravityAuthServiceOptions {
   readonly gates?: CapabilityGateRegistry
   readonly gatePath?: string
   readonly autoActivateGates?: boolean
+  /**
+   * Sign in several accounts and rotate between them. Off by default: existing installs
+   * keep the single-record store and its file layout untouched. When enabled without an
+   * explicit `store`, the multi-account pool at `authPoolPath` is used.
+   */
+  readonly multiAccount?: boolean
+  /** Pool file location; defaults to `accounts.json` beside the single-record store. */
+  readonly authPoolPath?: string
 }
 
 export type { HostCredential } from './credential-coordinator.ts'
+
+/** Outcome of an account-list operation the settings UI can invoke. */
+export type AccountOperationResult =
+  | { readonly state: 'selected' }
+  | { readonly state: 'removed' }
+  | { readonly state: 'unknown-account' }
 
 export class AntigravityAuthService implements BootstrapStatusService {
   private readonly store: AntigravityAuthStore
@@ -56,6 +85,7 @@ export class AntigravityAuthService implements BootstrapStatusService {
   private readonly quota: QuotaService
   private readonly gates: CapabilityGateRegistry
   private readonly autoActivate: boolean
+  private readonly accounts: AuthStorePool | undefined
   private riskAcknowledged = false
   private activeFlowGeneration = 0
   private disposed = false
@@ -64,7 +94,13 @@ export class AntigravityAuthService implements BootstrapStatusService {
   constructor(options: AntigravityAuthServiceOptions = {}) {
     this.autoActivate = options.autoActivateGates ?? false
     const storePath = options.storePath ?? defaultAuthStorePath()
-    this.store = options.store ?? createAuthStore(storePath)
+    this.accounts = options.multiAccount === true && options.store === undefined
+      ? createAuthStorePool(options.authPoolPath ?? defaultAuthPoolPath(storePath), {
+          // Adopt an existing single-account install on first use, without touching it.
+          legacyStorePath: storePath,
+        })
+      : undefined
+    this.store = options.store ?? this.accounts ?? createAuthStore(storePath)
     this.gates = options.gates ?? (options.gatePath !== undefined
       ? createFileCapabilityGates(options.gatePath)
       : options.store === undefined
@@ -73,6 +109,11 @@ export class AntigravityAuthService implements BootstrapStatusService {
     this.credentials = createCredentialCoordinator({
       ...options.credentialOptions,
       store: this.store,
+      // Rotation is wired only for the pool. Passing a no-op report for the single-record
+      // store would be misleading; leaving the hook unset keeps that path untouched.
+      ...(this.accounts === undefined
+        ? {}
+        : { onRefreshFailure: report => this.rotateOnFailure(report) }),
     })
     this.quota = createQuotaService({
       ...options.quotaOptions,
@@ -102,7 +143,50 @@ export class AntigravityAuthService implements BootstrapStatusService {
       ...(maskedEmail === undefined ? {} : { maskedEmail }),
       ...(flowStatus.errorCode === undefined ? {} : { errorCode: flowStatus.errorCode }),
     }
-    return createStatusView(this.riskAcknowledged, login, credentialStatus, this.credentials.revokeStatus(), gateEvidence)
+    return createStatusView(
+      this.riskAcknowledged,
+      login,
+      credentialStatus,
+      this.credentials.revokeStatus(),
+      gateEvidence,
+      await this.accountSummaries(record),
+    )
+  }
+
+  /**
+   * Build the value-safe account list for the settings UI.
+   *
+   * Returns `undefined` for the single-record store, which is what tells `createStatusView`
+   * the install is not pooled. Each account is addressed by a hash of its lineage rather
+   * than the lineage itself, so the identifier the browser holds cannot be replayed against
+   * any other surface.
+   */
+  private async accountSummaries(
+    active: AntigravityAuthRecord | undefined,
+  ): Promise<readonly AccountSummary[] | undefined> {
+    const pool = this.accounts
+    if (pool === undefined) return undefined
+    const state = await pool.readPool()
+    const nowMs = Date.now()
+    return state.accounts.map((account): AccountSummary => {
+      // `maskEmail` returns undefined for an address it cannot render; the field is then
+      // omitted rather than carried as an explicit undefined.
+      const masked = account.email === undefined ? undefined : maskEmail(account.email)
+      const cooling = account.cooldownUntil !== undefined && account.cooldownUntil > nowMs
+        ? { coolingUntil: account.cooldownUntil }
+        : {}
+      // Report the live streak, not the stored counter: once the streak has aged out the UI
+      // should stop calling an account failure-prone.
+      const liveFailures = effectiveFailureCount(account, nowMs)
+      const failures = liveFailures <= 0 ? {} : { failureCount: liveFailures }
+      return {
+        id: accountHandle(account.lineage),
+        ...(masked === undefined ? {} : { email: masked }),
+        active: active !== undefined && account.lineage === active.lineage,
+        ...cooling,
+        ...failures,
+      }
+    })
   }
 
   async acknowledgeRisk(): Promise<RiskAcknowledgementResult> {
@@ -142,6 +226,103 @@ export class AntigravityAuthService implements BootstrapStatusService {
 
   async capabilityGateEvidence(): Promise<CapabilityGateEvidence> {
     return this.gateEvidenceFor(await this.readRecord())
+  }
+
+  /**
+   * How many signed-in accounts a rotation may try. One for the single-record store, so
+   * callers can use this as an attempt budget without special-casing the pool.
+   */
+  async accountCount(): Promise<number> {
+    if (this.accounts === undefined) return (await this.readRecord()) === undefined ? 0 : 1
+    return (await this.accounts.readPool()).accounts.length
+  }
+
+  /** Accounts that are not resting, which is what a rotation can actually pick from. */
+  async readyAccountCount(): Promise<number> {
+    if (this.accounts === undefined) return this.accountCount()
+    return this.accounts.readyCount()
+  }
+
+  /**
+   * Apply one refresh failure to the account pool and report what the caller should do.
+   *
+   * Rotation lives here rather than in the credential coordinator because only the pool
+   * knows which account is current and how long it should rest. With the single-record
+   * store there is nothing to rotate to, so the decision degrades to the same
+   * stay/relogin advice without touching any file.
+   */
+  async rotateOnFailure(failure: {
+    readonly reason?: string | undefined
+    readonly message?: string | undefined
+    readonly status?: number | undefined
+    readonly retryAfterMs?: number | null
+    readonly family?: string | undefined
+  }): Promise<('rotate' | 'stay' | 'relogin' | 'exhausted')> {
+    const record = await this.readRecord()
+    if (record === undefined) return 'relogin'
+    const pool = this.accounts
+    if (pool === undefined) {
+      const decision = decideRotation({ ...failure, consecutiveFailures: 0 })
+      return decision.action
+    }
+    const current = (await pool.readPool()).accounts.find(account => account.lineage === record.lineage)
+    const decision = decideRotation({
+      ...failure,
+      // Age out a stale streak: a failure hours after the last one is a fresh start, so the
+      // ladder does not escalate against an account that has been fine in between.
+      consecutiveFailures: current === undefined ? 0 : effectiveFailureCount(current, Date.now()),
+    })
+    if (decision.action !== 'rotate') return decision.action
+    if (record.lineage !== undefined) {
+      await pool.markCooldown(record.lineage, decision.cooldownMs, failure.family)
+    }
+    // Report exhaustion explicitly so a caller can surface "every account is resting"
+    // instead of retrying against a pool that cannot serve the request.
+    return (await pool.readyCount()) === 0 ? 'exhausted' : 'rotate'
+  }
+
+  /**
+   * Make a pooled account the one the next request resolves to.
+   *
+   * Only meaningful with the pool: the single-record store has exactly one account, so the
+   * request is rejected rather than silently doing nothing.
+   */
+  async selectAccount(handle: string): Promise<AccountOperationResult> {
+    const pool = this.accounts
+    if (pool === undefined) throw new OAuthFlowError('internal', 'This install does not use an account pool')
+    const lineage = await this.resolveHandle(pool, handle)
+    if (lineage === undefined) return { state: 'unknown-account' }
+    // Selecting is a cursor move, not a credential write: the account must not be woken
+    // from a cooldown, because it has not proven it can serve a request yet.
+    await pool.setActive(lineage)
+    this.notifyStatus()
+    return { state: 'selected' }
+  }
+
+  /**
+   * Forget one pooled account.
+   *
+   * Removing the last account empties the pool, so `login` has to run again. The cached
+   * access token is dropped when the removed account was the active one, so the next
+   * request cannot keep using a credential whose account is gone.
+   */
+  async removeAccount(handle: string): Promise<AccountOperationResult> {
+    const pool = this.accounts
+    if (pool === undefined) throw new OAuthFlowError('internal', 'This install does not use an account pool')
+    const lineage = await this.resolveHandle(pool, handle)
+    if (lineage === undefined) return { state: 'unknown-account' }
+    const removed = await pool.removeAccount(lineage)
+    if (!removed) return { state: 'unknown-account' }
+    this.credentials.invalidateCache()
+    this.notifyStatus()
+    return { state: 'removed' }
+  }
+
+  /** Map a UI handle back to the lineage it addresses, or undefined when unknown. */
+  private async resolveHandle(pool: AuthStorePool, handle: string): Promise<string | undefined> {
+    if (typeof handle !== 'string' || handle.length === 0 || handle.length > 128) return undefined
+    const state = await pool.readPool()
+    return state.accounts.find(account => accountHandle(account.lineage) === handle)?.lineage
   }
 
   async gate0Passed(): Promise<boolean> {
@@ -230,13 +411,18 @@ export class AntigravityAuthService implements BootstrapStatusService {
     if (this.disposed || flowGeneration !== this.activeFlowGeneration || signal.aborted) {
       throw new OAuthFlowError('cancelled', 'The OAuth login was cancelled')
     }
-    const email = maskEmail(project.email ?? token.email)
+    // The raw address reaches the store only so it can derive a masked display form and a
+    // hashed identity tag; neither the pool nor the single-record store persists it. The
+    // single-record path masks it here, which the existing privacy test pins down.
+    const rawEmail = project.email ?? token.email
     const draft = {
       refreshToken: token.refreshToken,
       projectId: project.projectId,
-      ...(email === undefined ? {} : { email }),
+      ...(rawEmail === undefined
+        ? {}
+        : { email: this.accounts === undefined ? (maskEmail(rawEmail) ?? rawEmail) : rawEmail }),
     }
-    const committed = await this.store.compareAndCommit(current?.revision ?? 0, draft, current?.lineage)
+    const committed = await this.commitLogin(current, draft)
     if (committed === undefined) throw new OAuthFlowError('credential-conflict', 'The login changed while it was completing')
     if (this.autoActivate) {
       const subject = committed.lineage ?? 'legacy-account'
@@ -259,6 +445,40 @@ export class AntigravityAuthService implements BootstrapStatusService {
     // credential here so capability lifecycles register the LLM/search/image/
     // video routes without a Host restart.
     this.notifyStatus()
+  }
+
+  /**
+   * Persist one completed login, deciding whether it refreshes an existing account or
+   * adds a new one.
+   *
+   * The distinction cannot come from the single-record store: it only ever holds one
+   * account, so `compareAndCommit` with the observed lineage means "replace". The pool
+   * instead keys on a hashed identity tag — signing in with the same address refreshes
+   * that account, a new address joins the pool. The raw address is used only to compute
+   * the tag and is never written.
+   */
+  private async commitLogin(
+    current: AntigravityAuthRecord | undefined,
+    draft: { readonly refreshToken: string; readonly projectId: string; readonly email?: string },
+  ): Promise<AntigravityAuthRecord | undefined> {
+    const pool = this.accounts
+    if (pool === undefined) {
+      // Single-record semantics are unchanged: the observed lineage fences the write.
+      return await this.store.compareAndCommit(current?.revision ?? 0, draft, current?.lineage)
+    }
+    const state = await pool.readPool()
+    const tag = emailTagFor(draft.email)
+    const existing = tag === undefined
+      ? undefined
+      : state.accounts.find(account => account.emailTag === tag)
+    // A known account is updated in place, keeping the line so the caller's cached
+    // credential and gate evidence stay valid. An unknown account is given a fresh line and
+    // written with no *observed* lineage, which is the pool's append shape. Passing the new
+    // lineage as the observed one would instead demand an account that does not exist yet.
+    if (existing !== undefined) {
+      return await pool.compareAndCommit(state.revision, { ...draft, lineage: existing.lineage }, existing.lineage)
+    }
+    return await pool.compareAndCommit(state.revision, { ...draft, lineage: randomUUID() }, undefined)
   }
 
   private notifyStatus(): void {
