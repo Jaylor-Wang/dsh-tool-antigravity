@@ -86,6 +86,7 @@ export class AntigravityAuthService implements BootstrapStatusService {
   private readonly gates: CapabilityGateRegistry
   private readonly autoActivate: boolean
   private readonly accounts: AuthStorePool | undefined
+  private activeFamily: string | undefined
   private riskAcknowledged = false
   private activeFlowGeneration = 0
   private disposed = false
@@ -96,6 +97,7 @@ export class AntigravityAuthService implements BootstrapStatusService {
     const storePath = options.storePath ?? defaultAuthStorePath()
     this.accounts = options.multiAccount === true && options.store === undefined
       ? createAuthStorePool(options.authPoolPath ?? defaultAuthPoolPath(storePath), {
+          family: () => this.activeFamily,
           // Adopt an existing single-account install on first use, without touching it.
           legacyStorePath: storePath,
         })
@@ -258,6 +260,9 @@ export class AntigravityAuthService implements BootstrapStatusService {
     readonly retryAfterMs?: number | null
     readonly family?: string | undefined
   }): Promise<('rotate' | 'stay' | 'relogin' | 'exhausted')> {
+    if (failure.family !== undefined) {
+      this.activeFamily = failure.family
+    }
     const record = await this.readRecord()
     if (record === undefined) return 'relogin'
     const pool = this.accounts
@@ -276,6 +281,8 @@ export class AntigravityAuthService implements BootstrapStatusService {
     if (record.lineage !== undefined) {
       await pool.markCooldown(record.lineage, decision.cooldownMs, failure.family)
     }
+    this.credentials.invalidateCache()
+    this.notifyStatus()
     // Report exhaustion explicitly so a caller can surface "every account is resting"
     // instead of retrying against a pool that cannot serve the request.
     return (await pool.readyCount()) === 0 ? 'exhausted' : 'rotate'
@@ -295,6 +302,7 @@ export class AntigravityAuthService implements BootstrapStatusService {
     // Selecting is a cursor move, not a credential write: the account must not be woken
     // from a cooldown, because it has not proven it can serve a request yet.
     await pool.setActive(lineage)
+    this.credentials.invalidateCache()
     this.notifyStatus()
     return { state: 'selected' }
   }
@@ -364,7 +372,10 @@ export class AntigravityAuthService implements BootstrapStatusService {
     }
   }
 
-  async credential(signal?: AbortSignal, options?: { readonly forceRefresh?: boolean }): Promise<HostCredential | undefined> {
+  async credential(signal?: AbortSignal, options?: { readonly forceRefresh?: boolean; readonly family?: string }): Promise<HostCredential | undefined> {
+    if (options?.family !== undefined) {
+      this.activeFamily = options.family
+    }
     return await this.credentials.credential(signal, options)
   }
 

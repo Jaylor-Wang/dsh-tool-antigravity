@@ -73,7 +73,15 @@ const MAX_PROVIDER_ERROR_JSON_DEPTH = 8
 const MAX_PROVIDER_PARTS = 4096
 
 export interface AntigravityAuthCredentialSource {
-  credential(signal?: AbortSignal, options?: { readonly forceRefresh?: boolean }): Promise<HostCredential | undefined>
+  credential(signal?: AbortSignal, options?: { readonly forceRefresh?: boolean; readonly family?: string }): Promise<HostCredential | undefined>
+  rotateOnFailure?(failure: {
+    readonly reason?: string | undefined
+    readonly message?: string | undefined
+    readonly status?: number | undefined
+    readonly retryAfterMs?: number | null
+    readonly family?: string | undefined
+  }): Promise<('rotate' | 'stay' | 'relogin' | 'exhausted')>
+  accountCount?(): Promise<number>
 }
 
 export interface AntigravityAdapterOptions {
@@ -245,11 +253,14 @@ export class AntigravityAdapter extends LlmAdapter {
       yield finishChunk('aborted', 'CANCELLED')
       return
     }
+    const family = antigravityModelFamily(options.model)
     const hasEmitted = { value: false }
     let replayed = false
     let retriedNetwork = false
+    let rotationAttempts = 0
+    const maxRotations = await this.rotationBudget()
     for (;;) {
-      const credential = await this.readCredential(signal, replayed)
+      const credential = await this.readCredential(signal, replayed, family)
       if (credential === undefined) {
         throw new LlmError('Antigravity login is required before model use', 'AUTH')
       }
@@ -286,6 +297,14 @@ export class AntigravityAdapter extends LlmAdapter {
           replayed = true
           continue
         }
+        if (statusError.code === 'rate-limited' && !hasEmitted.value && !isAborted(signal) && rotationAttempts < maxRotations) {
+          await cancelResponse(response)
+          const rotated = await this.tryRotate(family, response.status, 'rate-limited')
+          if (rotated) {
+            rotationAttempts += 1
+            continue
+          }
+        }
         if ((response.status === 502 || response.status === 503 || response.status === 504) && !retriedNetwork && !hasEmitted.value && !isAborted(signal)) {
           await cancelResponse(response)
           retriedNetwork = true
@@ -313,6 +332,13 @@ export class AntigravityAdapter extends LlmAdapter {
         if (privateError?.code === 'authentication' && !replayed && !hasEmitted.value && !isAborted(signal)) {
           replayed = true
           continue
+        }
+        if (privateError?.code === 'rate-limited' && !hasEmitted.value && !isAborted(signal) && rotationAttempts < maxRotations) {
+          const rotated = await this.tryRotate(family, privateError.status ?? 429, 'rate-limited')
+          if (rotated) {
+            rotationAttempts += 1
+            continue
+          }
         }
         if (!retriedNetwork && !hasEmitted.value && !isAborted(signal) && isRetryableNetworkError(error)) {
           retriedNetwork = true
@@ -505,12 +531,41 @@ export class AntigravityAdapter extends LlmAdapter {
     this.catalogExpiresAt = Date.now() + MODEL_CATALOG_TTL_MS
   }
 
-  private async readCredential(signal: AbortSignal | undefined, forceRefresh: boolean): Promise<HostCredential | undefined> {
+  private async readCredential(signal: AbortSignal | undefined, forceRefresh: boolean, family?: string): Promise<HostCredential | undefined> {
     try {
-      return await this.adapterOptions.auth.credential(signal, forceRefresh ? { forceRefresh: true } : undefined)
+      return await this.adapterOptions.auth.credential(signal, {
+        ...(forceRefresh ? { forceRefresh: true } : {}),
+        ...(family !== undefined ? { family } : {}),
+      })
     } catch (error) {
       throw toLlmError(error)
     }
+  }
+
+  private async rotationBudget(): Promise<number> {
+    const auth = this.adapterOptions.auth as AntigravityAuthCredentialSource
+    if (typeof auth.accountCount !== 'function') return 1
+    try {
+      const count = await auth.accountCount()
+      return Math.max(1, count)
+    } catch {
+      return 1
+    }
+  }
+
+  private async tryRotate(family: string, status = 429, message = 'rate-limited'): Promise<boolean> {
+    const auth = this.adapterOptions.auth as AntigravityAuthCredentialSource
+    if (typeof auth.rotateOnFailure !== 'function') return false
+    try {
+      const decision = await auth.rotateOnFailure({ status, family, message })
+      if (decision === 'rotate') {
+        this.invalidateModelCatalog()
+        return true
+      }
+    } catch {
+      return false
+    }
+    return false
   }
 }
 
@@ -1310,6 +1365,7 @@ function isAuthenticationCode(value: string | undefined): boolean {
   const normalized = value?.toUpperCase()
   return normalized === 'UNAUTHENTICATED' || normalized === 'AUTHENTICATION' || normalized === 'INVALID_GRANT' || normalized === 'UNAUTHENTICATED_REQUEST'
 }
+
 
 function mapFinishReason(value: string | undefined): FinishReason['kind'] {
   const normalized = value?.toUpperCase()

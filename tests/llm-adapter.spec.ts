@@ -547,6 +547,45 @@ describe('Antigravity LLM adapter', () => {
     expect(chunks.some(chunk => chunk.type === 'text-delta' && chunk.text === 'recovered-503')).toBe(true)
   })
 
+  it('rotates to next account and retries after a pre-delta 429 rate limit response', async () => {
+    const transport = {
+      request: vi.fn()
+        .mockResolvedValueOnce(new Response('', { status: 429 }))
+        .mockResolvedValueOnce(new Response('data: {"response":{"parts":[{"text":"recovered-rotated"}],"finishReason":"STOP"}}\n\n')),
+    }
+    const rotateOnFailure = vi.fn().mockResolvedValue('rotate')
+    const auth = {
+      credential: vi.fn()
+        .mockResolvedValueOnce(credential('account-a'))
+        .mockResolvedValueOnce(credential('account-b')),
+      rotateOnFailure,
+      accountCount: vi.fn().mockResolvedValue(2),
+    }
+    const adapter = new AntigravityAdapter({ auth, transport })
+    const chunks: StreamChunk[] = []
+    for await (const chunk of adapter.stream(options({ model: 'antigravity-gemini-3.7-flash' }))) chunks.push(chunk)
+    expect(rotateOnFailure).toHaveBeenCalledWith(expect.objectContaining({ status: 429, family: 'gemini' }))
+    expect(transport.request).toHaveBeenCalledTimes(2)
+    expect(auth.credential).toHaveBeenCalledTimes(2)
+    expect(chunks.some(chunk => chunk.type === 'text-delta' && chunk.text === 'recovered-rotated')).toBe(true)
+  })
+
+  it('throws rate limit error when rotation budget is exhausted', async () => {
+    const transport = {
+      request: vi.fn().mockResolvedValue(new Response('', { status: 429 })),
+    }
+    const rotateOnFailure = vi.fn().mockResolvedValue('exhausted')
+    const auth = {
+      credential: vi.fn().mockResolvedValue(credential('account-a')),
+      rotateOnFailure,
+      accountCount: vi.fn().mockResolvedValue(1),
+    }
+    const adapter = new AntigravityAdapter({ auth, transport })
+    await expect(async () => {
+      for await (const _chunk of adapter.stream(options())) { /* empty */ }
+    }).rejects.toThrow(/rate limit reached/)
+  })
+
   it('exposes newly supported Gemini 3.8 while filtering absent legacy models through the public catalog', async () => {
     const ctx = new Context()
     try {

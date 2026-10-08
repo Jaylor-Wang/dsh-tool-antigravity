@@ -14,7 +14,7 @@ import { createAuthStore } from '../src/auth-store.ts'
 import { createAuthStorePool, emailTagFor, readPoolFile } from '../src/auth-store-pool.ts'
 import { createMemoryCapabilityGates } from '../src/capability-gates.ts'
 import { CredentialOperationError } from '../src/credential-coordinator.ts'
-
+import { AntigravityAdapter } from '../src/llm-adapter.ts'
 const directories: string[] = []
 
 async function workspace(): Promise<{ directory: string; storePath: string }> {
@@ -297,5 +297,61 @@ describe('C: a refresh failure rotates the pool through the real coordinator', (
     expect(await service.rotateOnFailure({ status: 429 })).toBe('rotate')
     expect(await service.readyAccountCount()).toBe(1)
     await expect(readFile(join(directory, 'accounts.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+})
+
+describe('D: LLM 429 automatically rotates accounts and recovers generation', () => {
+  it('switches from an exhausted account to the next ready account on 429 during stream', async () => {
+    const { directory, storePath } = await workspace()
+    const pool = createAuthStorePool(join(directory, 'accounts.json'))
+    await pool.commit({ refreshToken: 'token-a', projectId: 'p', email: 'a@example.com' })
+    await pool.commit({ refreshToken: 'token-b', projectId: 'p', email: 'b@example.com' })
+
+    const service = createAntigravityAuthService({
+      storePath,
+      multiAccount: true,
+      gates: createMemoryCapabilityGates(),
+      credentialOptions: {
+        refreshToken: async ({ refreshToken }) => ({
+          accessToken: `access-for-${refreshToken}`,
+          expiresAt: Date.now() + 3_600_000,
+        }),
+      },
+    })
+
+    const requests: string[] = []
+    const transport = {
+      request: vi.fn(async (input: { accessToken?: string }) => {
+        const token = input.accessToken ?? ''
+        requests.push(token)
+        if (token === 'access-for-token-a') {
+          return new Response('', { status: 429 })
+        }
+        return new Response('data: {"response":{"parts":[{"text":"hello from account b"}],"finishReason":"STOP"}}\n\n')
+      }),
+    }
+
+    const adapter = new AntigravityAdapter({
+      auth: service,
+      transport,
+    })
+
+    const chunks = []
+    for await (const chunk of adapter.stream({
+      provider: 'google-antigravity',
+      model: 'antigravity-gemini-3.7-flash',
+      messages: [{
+        id: 'msg-1' as never,
+        role: 'user',
+        content: [{ type: 'text', text: 'hi' }],
+        source: { kind: 'user' },
+      }],
+    })) {
+      chunks.push(chunk)
+    }
+
+    expect(requests).toEqual(['access-for-token-a', 'access-for-token-b'])
+    expect(chunks.some(chunk => chunk.type === 'text-delta' && chunk.text === 'hello from account b')).toBe(true)
+    expect(await service.readyAccountCount()).toBe(1)
   })
 })
