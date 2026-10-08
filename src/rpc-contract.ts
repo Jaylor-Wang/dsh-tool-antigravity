@@ -230,7 +230,6 @@ function parseStatus(value: unknown): AntigravityStatusView | undefined {
   if (accounts === undefined) return undefined
   // The two shapes must agree, or the UI would render a pool it cannot act on.
   if (value.singleAccount === true && accounts.length > 0) return undefined
-  if (value.singleAccount === false && accounts.length === 0) return undefined
 
   const login = parseLoginStatus(value.login)
   if (login === undefined) return undefined

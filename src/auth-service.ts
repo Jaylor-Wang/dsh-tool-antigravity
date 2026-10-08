@@ -61,9 +61,8 @@ export interface AntigravityAuthServiceOptions {
   readonly gatePath?: string
   readonly autoActivateGates?: boolean
   /**
-   * Sign in several accounts and rotate between them. Off by default: existing installs
-   * keep the single-record store and its file layout untouched. When enabled without an
-   * explicit `store`, the multi-account pool at `authPoolPath` is used.
+   * Sign in several accounts and rotate between them. On by default.
+   * When enabled without an explicit `store`, the multi-account pool at `authPoolPath` is used.
    */
   readonly multiAccount?: boolean
   /** Pool file location; defaults to `accounts.json` beside the single-record store. */
@@ -95,7 +94,7 @@ export class AntigravityAuthService implements BootstrapStatusService {
   constructor(options: AntigravityAuthServiceOptions = {}) {
     this.autoActivate = options.autoActivateGates ?? false
     const storePath = options.storePath ?? defaultAuthStorePath()
-    this.accounts = options.multiAccount === true && options.store === undefined
+    this.accounts = options.multiAccount !== false && options.store === undefined
       ? createAuthStorePool(options.authPoolPath ?? defaultAuthPoolPath(storePath), {
           family: () => this.activeFamily,
           // Adopt an existing single-account install on first use, without touching it.

@@ -24,8 +24,7 @@ export const inject = ['llm', 'attachments']
 export interface AntigravityAuthConfig {
   proxy?: string
   /**
-   * Sign in several accounts and rotate between them on quota exhaustion. Off by default
-   * so existing installs keep their single-account file layout until they opt in.
+   * Sign in several accounts and rotate between them on quota exhaustion. On by default.
    */
   multiAccount?: boolean
 }
@@ -41,7 +40,7 @@ export function apply(ctx: Context, config: AntigravityAuthConfig = {}): void {
   const service = createAntigravityAuthService({
     storePath: defaultAuthStorePath(),
     autoActivateGates: true,
-    multiAccount: config.multiAccount === true,
+    multiAccount: config.multiAccount !== false,
   })
   // Account-control activation for the slash command. A terminal composition
   // composes no public WebServer, so the command starts enabled (local-only

@@ -5,7 +5,7 @@ English | [中文](README.zh.md)
 [![npm version](https://img.shields.io/npm/v/dsh-tool-antigravity.svg?color=blue)](https://www.npmjs.com/package/dsh-tool-antigravity)
 [![license](https://img.shields.io/github/license/Jaylor-Wang/dsh-tool-antigravity.svg)](LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/Jaylor-Wang/dsh-tool-antigravity.svg)](https://github.com/Jaylor-Wang/dsh-tool-antigravity/releases)
-[![Tests](https://img.shields.io/badge/tests-29%20suites%20%7C%20279%20passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-37%20suites%20%7C%20395%20passed-brightgreen.svg)](tests/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Strict%20Types-blue.svg)](tsconfig.json)
 
 High-performance, streamlined Antigravity capability bundle plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH).
@@ -14,13 +14,12 @@ Provides private Google OAuth 2.0 PKCE authentication, multi-model LLM routing (
 
 ---
 
-## Highlights in v0.3.5 (Multi-Account Pool with Quota-Driven Rotation)
+## Highlights in v0.3.6 (Multi-Account Pool Enabled by Default)
 
-- **Multi-Account Pool (`accounts.json`)**: Seamlessly manage multiple Google Antigravity accounts with strict POSIX `0600` owner-only permissions, inter-process locking (`.pool.lock`), and salted SHA-256 identity tagging (`emailTag`) without exposing PII.
-- **Quota-Driven Automatic Rotation**: Automatically detects LLM 429 quota exhaustion during generation, marks cooldowns, and rotates to the next ready account with zero interruption to downstream users.
-- **Per-Model-Family Cursor Isolation**: Independent rotation cursors for Gemini and Claude model families (`activeIndexByFamily`)—quota exhaustion on Gemini never burns Claude.
-- **Visual Settings Management**: View signed-in accounts, active status, cooldown countdowns, and failure counts with one-click account switching and removal in the settings card.
-- **Retains v0.3.2 capabilities**: Scoped HTTPS proxy isolation, zero global dispatcher pollution, and robust keep-alive connection pooling.
+- **Default Multi-Account Pool**: Multi-account pool is now enabled out-of-the-box (`multiAccount: true` by default) without requiring manual configuration.
+- **Zero-Friction Legacy Migration**: Automatically and losslessly adopts existing single-account credentials (`auth.json`) into the pool (`accounts.json`) on first start.
+- **Robust Status Contract**: Fixed RPC contract boundary to seamlessly handle empty account pool states.
+- **Retains v0.3.5 capabilities**: Quota-driven automatic rotation on LLM 429, per-model-family cursor isolation, visual account management in settings card, and scoped HTTPS proxy isolation.
 ## Features
 
 ### 1. High-Performance Core Architecture
