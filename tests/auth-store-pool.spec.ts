@@ -11,6 +11,7 @@ import {
   AUTH_POOL_VERSION,
   createAuthStorePool,
   defaultAuthPoolPath,
+  maskForStorage,
   migrateLegacyRecord,
   readPoolFile,
   writePoolFile,
@@ -309,7 +310,7 @@ describe('auth-store-pool', () => {
     expect(committed.refreshToken).toBe('token-a')
     // The persisted address is masked, and identity is a hash, so the raw address never
     // reaches the file.
-    expect(committed.email).toBe('u***@example.com')
+    expect(committed.email).toBe('u***r@example.com')
     expect(committed.lineage).toBeDefined()
     const read = await store.read()
     expect(read?.projectId).toBe('project-a')
@@ -436,6 +437,17 @@ describe('auth-store-pool', () => {
   it('defaults the pool path next to the auth store', () => {
     const resolved = defaultAuthPoolPath(join('C:', 'data', 'dsh-tool-antigravity', 'auth.json'))
     expect(resolved.endsWith(join('dsh-tool-antigravity', 'accounts.json'))).toBe(true)
+  })
+})
+
+describe('maskForStorage', () => {
+  it('includes the trailing character before the @ symbol', () => {
+    expect(maskForStorage('hediwang666@gmail.com')).toBe('h***6@gmail.com')
+    expect(maskForStorage('alice@example.com')).toBe('a***e@example.com')
+    expect(maskForStorage('ab@gmail.com')).toBe('a***b@gmail.com')
+    expect(maskForStorage('a@gmail.com')).toBe('a***@gmail.com')
+    expect(maskForStorage('h***@gmail.com')).toBe('h***@gmail.com')
+    expect(maskForStorage('@gmail.com')).toBe('***')
   })
 })
 

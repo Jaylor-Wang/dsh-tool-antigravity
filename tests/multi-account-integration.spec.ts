@@ -93,7 +93,7 @@ describe('A: a second login joins the pool instead of replacing the first', () =
     // The same privacy contract the single-record store is held to.
     expect(raw).not.toContain('alice@example.com')
     const state = await readPoolFile(poolPath)
-    expect(state.accounts[0]?.email).toBe('a***@example.com')
+    expect(state.accounts[0]?.email).toBe('a***e@example.com')
     expect(state.accounts[0]?.emailTag).toBe(emailTagFor('alice@example.com'))
   })
 

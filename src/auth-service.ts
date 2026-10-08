@@ -556,5 +556,8 @@ export function maskEmail(value: string | undefined): string | undefined {
   const local = value.slice(0, at)
   const domain = value.slice(at + 1)
   if (!/^[^\s@]+$/u.test(local) || !/^[^\s@]+$/u.test(domain)) return undefined
-  return `${local.slice(0, 1)}***@${domain}`
+  if (local.endsWith('***')) return `${local}@${domain}`
+  const head = local.slice(0, 1)
+  const tail = local.length > 1 ? local.slice(-1) : ''
+  return `${head}***${tail}@${domain}`
 }

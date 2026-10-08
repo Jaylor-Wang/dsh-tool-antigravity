@@ -91,7 +91,12 @@ export function emailTagFor(email: string | undefined): string | undefined {
 export function maskForStorage(email: string): string {
   const at = email.indexOf('@')
   if (at <= 0 || at === email.length - 1) return '***'
-  return `${email.slice(0, 1)}***@${email.slice(at + 1)}`
+  const local = email.slice(0, at)
+  const domain = email.slice(at + 1)
+  if (local.endsWith('***')) return `${local}@${domain}`
+  const head = local.slice(0, 1)
+  const tail = local.length > 1 ? local.slice(-1) : ''
+  return `${head}***${tail}@${domain}`
 }
 
 /**

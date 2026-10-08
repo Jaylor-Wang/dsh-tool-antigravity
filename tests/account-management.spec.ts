@@ -67,7 +67,7 @@ describe('status publishes the account pool', () => {
     const serialized = JSON.stringify(status)
     expect(serialized).not.toContain('alice@example.com')
     expect(serialized).not.toContain(committed.lineage ?? 'unreachable')
-    expect(status.accounts[0]?.email).toBe('a***@example.com')
+    expect(status.accounts[0]?.email).toBe('a***e@example.com')
     // The handle is a stable hash, not the lineage itself.
     expect(status.accounts[0]?.id).toBe(accountHandle(committed.lineage ?? ''))
   })

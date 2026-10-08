@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createMemoryAuthStore } from '../src/auth-store.ts'
-import { createAntigravityAuthService } from '../src/auth-service.ts'
+import { createAntigravityAuthService, maskEmail } from '../src/auth-service.ts'
 import type { PrivateTransport, PrivateTransportRequest } from '../src/private-transport.ts'
 import type { LoopbackCallbackRequest } from '../src/oauth-flow.ts'
 import { createMemoryCapabilityGates, type CapabilityGateRegistry } from '../src/capability-gates.ts'
@@ -67,13 +67,13 @@ describe('Antigravity auth service', () => {
     })
 
     const record = await store.read()
-    expect(record).toMatchObject({ refreshToken: 'refresh-secret', projectId: 'project-secret', email: 'a***@example.com' })
+    expect(record).toMatchObject({ refreshToken: 'refresh-secret', projectId: 'project-secret', email: 'a***e@example.com' })
     expect(JSON.stringify(record)).not.toContain('access-secret')
     expect(JSON.stringify(record)).not.toContain('alice@example.com')
     expect(JSON.stringify(await service.status())).not.toContain('project-secret')
     expect(await service.status()).toMatchObject({
       riskAcknowledged: true,
-      login: { phase: 'success', configured: true, projectAvailable: true, maskedEmail: 'a***@example.com' },
+      login: { phase: 'success', configured: true, projectAvailable: true, maskedEmail: 'a***e@example.com' },
       capabilities: [
         { id: 'auth-llm', state: 'poc-pending', reasonCode: 'gate-not-run' },
         { id: 'image', state: 'poc-pending', reasonCode: 'gate-not-run' },
@@ -337,5 +337,27 @@ describe('Antigravity auth service', () => {
     await expect(service.credential()).resolves.toMatchObject({ accessToken: 'old-access', projectId: 'old-project' })
     await expect(service.status()).resolves.toMatchObject({ login: { configured: true, projectAvailable: true } })
     await service.dispose()
+  })
+})
+
+describe('maskEmail', () => {
+  it('includes the first and trailing local character before the domain', () => {
+    expect(maskEmail('hediwang666@gmail.com')).toBe('h***6@gmail.com')
+    expect(maskEmail('alice@example.com')).toBe('a***e@example.com')
+    expect(maskEmail('bob@gmail.com')).toBe('b***b@gmail.com')
+    expect(maskEmail('ab@gmail.com')).toBe('a***b@gmail.com')
+  })
+
+  it('handles single-character usernames and already masked addresses', () => {
+    expect(maskEmail('a@gmail.com')).toBe('a***@gmail.com')
+    expect(maskEmail('h***@gmail.com')).toBe('h***@gmail.com')
+    expect(maskEmail('h***6@gmail.com')).toBe('h***6@gmail.com')
+  })
+
+  it('rejects invalid or unsafe email strings', () => {
+    expect(maskEmail(undefined)).toBeUndefined()
+    expect(maskEmail('')).toBeUndefined()
+    expect(maskEmail('@gmail.com')).toBeUndefined()
+    expect(maskEmail('invalid')).toBeUndefined()
   })
 })
