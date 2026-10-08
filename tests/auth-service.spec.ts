@@ -342,7 +342,7 @@ describe('Antigravity auth service', () => {
 
 describe('maskEmail', () => {
   it('includes the first and trailing local character before the domain', () => {
-    expect(maskEmail('hediwang666@gmail.com')).toBe('h***6@gmail.com')
+    expect(maskEmail('user888@gmail.com')).toBe('u***8@gmail.com')
     expect(maskEmail('alice@example.com')).toBe('a***e@example.com')
     expect(maskEmail('bob@gmail.com')).toBe('b***b@gmail.com')
     expect(maskEmail('ab@gmail.com')).toBe('a***b@gmail.com')

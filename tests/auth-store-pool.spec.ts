@@ -442,7 +442,7 @@ describe('auth-store-pool', () => {
 
 describe('maskForStorage', () => {
   it('includes the trailing character before the @ symbol', () => {
-    expect(maskForStorage('hediwang666@gmail.com')).toBe('h***6@gmail.com')
+    expect(maskForStorage('user888@gmail.com')).toBe('u***8@gmail.com')
     expect(maskForStorage('alice@example.com')).toBe('a***e@example.com')
     expect(maskForStorage('ab@gmail.com')).toBe('a***b@gmail.com')
     expect(maskForStorage('a@gmail.com')).toBe('a***@gmail.com')
