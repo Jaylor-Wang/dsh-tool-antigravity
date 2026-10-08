@@ -14,12 +14,13 @@ Provides private Google OAuth 2.0 PKCE authentication, multi-model LLM routing (
 
 ---
 
-## Highlights in v0.3.2 (Scoped Proxy Isolation & Zero Cross-Plugin Pollution)
+## Highlights in v0.3.5 (Multi-Account Pool with Quota-Driven Rotation)
 
-- **Eliminate Global Dispatcher Pollution (Fixes #3)**: Completely removed `setGlobalDispatcher` mutation, ensuring Antigravity proxy configurations remain strictly scoped and never intercept outbound requests from other providers or host harnesses.
-- **Scoped HTTPS Fetch Transport**: Built an isolated `scopedHttpsFetch` pipeline using native HTTP/1.1 TLS CONNECT tunneling that honors explicit and environmental proxy settings and `NO_PROXY` bypasses without touching process-wide network state.
-- **All-Round OAuth Scope Isolation**: Migrated OAuth token exchange, refresh, and revocation to scoped HTTPS fetch transport by default.
-- **Retains v0.3.1 capabilities**: Proxy fetch reactivity, isolated test suite storage, and volatile settings syncing.
+- **Multi-Account Pool (`accounts.json`)**: Seamlessly manage multiple Google Antigravity accounts with strict POSIX `0600` owner-only permissions, inter-process locking (`.pool.lock`), and salted SHA-256 identity tagging (`emailTag`) without exposing PII.
+- **Quota-Driven Automatic Rotation**: Automatically detects LLM 429 quota exhaustion during generation, marks cooldowns, and rotates to the next ready account with zero interruption to downstream users.
+- **Per-Model-Family Cursor Isolation**: Independent rotation cursors for Gemini and Claude model families (`activeIndexByFamily`)—quota exhaustion on Gemini never burns Claude.
+- **Visual Settings Management**: View signed-in accounts, active status, cooldown countdowns, and failure counts with one-click account switching and removal in the settings card.
+- **Retains v0.3.2 capabilities**: Scoped HTTPS proxy isolation, zero global dispatcher pollution, and robust keep-alive connection pooling.
 ## Features
 
 ### 1. High-Performance Core Architecture
