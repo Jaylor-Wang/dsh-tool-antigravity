@@ -105,10 +105,20 @@ export function antigravityModelFamily(model: string): AntigravityReplayResponse
   return 'unknown'
 }
 
+const CORE_TOOLS = new Set([
+  'read', 'write', 'edit', 'pwsh', 'bash', 'glob', 'grep',
+  'read_page', 'web_search', 'web_fetch', 'ask_user_question',
+])
+
 /** Convert DSH schemas to the small function-declaration subset accepted privately. */
 export function sanitizeToolSchemas(tools: readonly ToolSchema[] | undefined): readonly Record<string, unknown>[] {
   if (tools === undefined) return []
-  return tools.slice(0, 64).map(tool => ({
+  const sorted = [...tools].sort((a, b) => {
+    const aCore = CORE_TOOLS.has(a.name) ? 1 : 0
+    const bCore = CORE_TOOLS.has(b.name) ? 1 : 0
+    return bCore - aCore
+  })
+  return sorted.slice(0, 384).map(tool => ({
     name: boundedName(tool.name),
     description: boundedText(tool.description, 4096),
     parameters: sanitizeSchema(tool.parameters),
@@ -131,7 +141,10 @@ function sanitizeSchema(value: unknown, depth = 0): Record<string, unknown> {
   const output: Record<string, unknown> = { type }
   if (typeof value.description === 'string') output.description = boundedText(value.description, 1024)
   if (Array.isArray(value.required)) output.required = value.required.filter(item => typeof item === 'string').slice(0, 128)
-  if (Array.isArray(value.enum)) output.enum = value.enum.slice(0, 128).filter(item => ['string', 'number', 'boolean', 'null'].includes(typeof item))
+  if (Array.isArray(value.enum)) {
+    const filtered = value.enum.slice(0, 128).filter(item => ['string', 'number', 'boolean', 'null'].includes(typeof item) && item !== '')
+    if (filtered.length > 0) output.enum = filtered
+  }
   if (type === 'object' && isRecord(value.properties)) {
     const properties: Record<string, unknown> = {}
     for (const [key, item] of Object.entries(value.properties).slice(0, 128)) {
