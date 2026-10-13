@@ -2,6 +2,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
+import type { FileSystem } from '@deepseek-ai/dsh-fs'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-commands'
 import type {} from '@deepseek-ai/dsh-host-webserver'
@@ -54,10 +55,14 @@ export function apply(ctx: Context, config: AntigravityAuthConfig = {}): void {
       registerAdapter?: (providers: string[], adapter: AntigravityAdapter) => (() => void) & { replace?: (providers: string[]) => void }
     }
     attachments?: Pick<AttachmentStore, 'readImage'>
+    reflect?: { get?: (name: string, required?: boolean) => unknown }
   }
+  /** fs is optional: a mounted filesystem only enriches offload placeholders with a recovery path. */
+  const fs = runtime.reflect?.get?.('fs', false) as FileSystem | undefined
   const adapter = new AntigravityAdapter({
     auth: service,
     ...(runtime.attachments === undefined ? {} : { attachments: runtime.attachments }),
+    ...(fs === undefined ? {} : { fs }),
   })
   const contextWithProvide = ctx as Context & { provide?: (name: string, value: unknown) => () => Promise<void> | void }
   const unprovide = contextWithProvide.provide?.('antigravityAuth', service) ?? (() => {})
