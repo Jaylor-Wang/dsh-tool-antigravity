@@ -1170,7 +1170,9 @@ function mapMessage(message: Message, model: string, toolNames: Map<string, stri
       parts.push({ text: block.text, thought: true, ...(blockSignature === undefined ? {} : { thoughtSignature: blockSignature }) })
     } else if (block.type === 'tool-call') {
       const callId = rememberToolName(toolNames, block.id, block.name)
-      const signature = isClaude && sawClaudeFunctionCall ? undefined : (blockSignature ?? SKIP_THOUGHT_SIGNATURE)
+      const signature = isClaude
+        ? (sawClaudeFunctionCall ? undefined : (blockSignature ?? SKIP_THOUGHT_SIGNATURE))
+        : blockSignature
       sawClaudeFunctionCall ||= isClaude
       parts.push({
         functionCall: {
@@ -1269,7 +1271,9 @@ async function mapMessageWithAttachments(
       parts.push({ text: block.text, thought: true, ...(blockSignature === undefined ? {} : { thoughtSignature: blockSignature }) })
     } else if (block.type === 'tool-call') {
       const callId = rememberToolName(toolNames, block.id, block.name)
-      const signature = isClaude && sawClaudeFunctionCall ? undefined : (blockSignature ?? SKIP_THOUGHT_SIGNATURE)
+      const signature = isClaude
+        ? (sawClaudeFunctionCall ? undefined : (blockSignature ?? SKIP_THOUGHT_SIGNATURE))
+        : blockSignature
       sawClaudeFunctionCall ||= isClaude
       parts.push({
         functionCall: {
