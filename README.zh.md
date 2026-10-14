@@ -5,7 +5,7 @@
 [![npm version](https://img.shields.io/npm/v/dsh-tool-antigravity.svg?color=blue)](https://www.npmjs.com/package/dsh-tool-antigravity)
 [![license](https://img.shields.io/github/license/Jaylor-Wang/dsh-tool-antigravity.svg)](LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/Jaylor-Wang/dsh-tool-antigravity.svg)](https://github.com/Jaylor-Wang/dsh-tool-antigravity/releases)
-[![Tests](https://img.shields.io/badge/tests-37%20suites%20%7C%20395%20passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-38%20suites%20%7C%20404%20passed-brightgreen.svg)](tests/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Strict%20Types-blue.svg)](tsconfig.json)
 
 为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) 打造的高性能 Antigravity 核心能力包插件。
@@ -14,12 +14,12 @@
 
 ---
 
-## v0.3.6 版本重要更新 (多账号池默认启用与状态契约优化)
+## v0.4.0 版本重要更新 (工具 Schema 加固、响应错误契约与图片协商卸载)
 
-- **多账号池默认开箱即用**：将多账号池（`multiAccount: true`）提升为默认开启状态，安装后无需手动在配置文件中声明即可直接管理多个账号并自动轮换。
-- **平滑无感单账号迁移**：启动时自动无损接管原单账号历史凭据（`auth.json`）并平滑迁移至账号池（`accounts.json`），绝不中断既有会话。
-- **状态 RPC 契约容错**：优化前端状态解析逻辑，彻底消除账号池为空时的状态解析异常。
-- **完整保留 v0.3.5 核心能力**：模型推理 429 自动冷却与轮换、Gemini/Claude 独立模型游标隔离、设置面板可视化账号管理与 Scoped HTTPS 代理作用域隔离。
+- **工具 Schema 加固与清洗**：自动过滤 Schema 中导致 Google Cloud Code 报 400 Bad Request 的空字符串枚举值（`enum: [""]`），并将核心工具优先置顶、容量上限扩展至 384。
+- **精准工具错误契约与去重**：统一将工具执行失败写入 `response.error` 契约，彻底消除多轮对话中重复投递的冗余工具响应文本块。
+- **多智能体图片智能卸载协商**：引入单图 4MP / 1MB 及整包 12MB 的严格传输预算校验，超出时触发 `IMAGE_OFFLOAD_REQUIRED_CODE` 协同客户端完成文件落盘与引用卸载。
+- **完整保留 v0.3.6 核心能力**：开箱即用多账号池管理、模型推理 429 自动冷却与无感轮换、Gemini/Claude 独立模型游标隔离、设置面板可视化管理与 Scoped HTTPS 代理作用域隔离。
 ## 核心特性与架构设计
 
 ### 1. 高性能底层架构

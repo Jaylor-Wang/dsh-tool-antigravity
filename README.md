@@ -5,7 +5,7 @@ English | [中文](README.zh.md)
 [![npm version](https://img.shields.io/npm/v/dsh-tool-antigravity.svg?color=blue)](https://www.npmjs.com/package/dsh-tool-antigravity)
 [![license](https://img.shields.io/github/license/Jaylor-Wang/dsh-tool-antigravity.svg)](LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/Jaylor-Wang/dsh-tool-antigravity.svg)](https://github.com/Jaylor-Wang/dsh-tool-antigravity/releases)
-[![Tests](https://img.shields.io/badge/tests-37%20suites%20%7C%20395%20passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-38%20suites%20%7C%20404%20passed-brightgreen.svg)](tests/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Strict%20Types-blue.svg)](tsconfig.json)
 
 High-performance, streamlined Antigravity capability bundle plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH).
@@ -14,12 +14,12 @@ Provides private Google OAuth 2.0 PKCE authentication, multi-model LLM routing (
 
 ---
 
-## Highlights in v0.3.6 (Multi-Account Pool Enabled by Default)
+## Highlights in v0.4.0 (Tool Schema Hardening, Response Error Semantics & Image Offloading)
 
-- **Default Multi-Account Pool**: Multi-account pool is now enabled out-of-the-box (`multiAccount: true` by default) without requiring manual configuration.
-- **Zero-Friction Legacy Migration**: Automatically and losslessly adopts existing single-account credentials (`auth.json`) into the pool (`accounts.json`) on first start.
-- **Robust Status Contract**: Fixed RPC contract boundary to seamlessly handle empty account pool states.
-- **Retains v0.3.5 capabilities**: Quota-driven automatic rotation on LLM 429, per-model-family cursor isolation, visual account management in settings card, and scoped HTTPS proxy isolation.
+- **Tool Schema Hardening & Sanitization**: Prunes empty string `enum` values to prevent Google Cloud Code 400 Bad Request rejections, and prioritizes core harness tools with capacity expanded up to 384 tools.
+- **Precise Tool Error Semantics**: Accurately reports tool execution failures under `response.error` across all model families, while deduplicating redundant tool responses.
+- **Multi-Agent Image Offloading**: Enforces strict transport payload budgets (12MB total transport limit, 4MP / 1MB image limits) and transparently negotiates client offloading using `IMAGE_OFFLOAD_REQUIRED_CODE`.
+- **Retains v0.3.6 capabilities**: Out-of-the-box multi-account pool (`multiAccount: true`), quota-driven automatic rotation on LLM 429, per-model-family cursor isolation, visual settings panel, and scoped proxy isolation.
 ## Features
 
 ### 1. High-Performance Core Architecture
