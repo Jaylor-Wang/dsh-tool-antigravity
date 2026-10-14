@@ -15,6 +15,7 @@ import {
   orderAgyRequestPayloadInPlace,
   resolveModelWithTier,
 } from '@cortexkit/antigravity-auth-core'
+import * as dshLlm from '@deepseek-ai/dsh-llm'
 import {
   CONTEXT_WINDOW_EXCEEDED_CODE,
   ToolCallId,
@@ -23,7 +24,8 @@ import {
   ReasoningEffortId,
   resolveRetryPolicy,
 } from '@deepseek-ai/dsh-llm'
-import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
+import { requestImageDimensions, type AttachmentStore, type ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
+import type { FileSystem } from '@deepseek-ai/dsh-fs'
 import type {
   FinishReason,
   GenerateOptions,
@@ -38,6 +40,7 @@ import type {
 import type { CredentialCoordinator, HostCredential } from './credential-coordinator.ts'
 import {
   DEFAULT_PRIVATE_FRAME_BYTES,
+  DEFAULT_PRIVATE_REQUEST_BYTES,
   DEFAULT_PRIVATE_IDLE_TIMEOUT_MS,
   DEFAULT_PRIVATE_RESPONSE_BYTES,
   DEFAULT_PRIVATE_RESPONSE_HEADER_TIMEOUT_MS,
@@ -61,6 +64,10 @@ import { classifyPrivateFailure, type PrivateFailureKind } from './private-failu
 import type { AntigravityModelCatalogState, AntigravityModelCatalogView } from './model-catalog.ts'
 
 export const ANTIGRAVITY_PROVIDER = 'google-antigravity' as const
+const ANTIGRAVITY_REQUEST_IMAGE_MAX_PIXELS = 4 * 1024 * 1024
+const ANTIGRAVITY_REQUEST_IMAGE_MAX_BYTES = 1024 * 1024
+/** Inline image budget for the private route: base64 bytes the transport tolerates for images alone. */
+const ANTIGRAVITY_INLINE_IMAGE_BYTES = 12 * 1024 * 1024
 export const ANTIGRAVITY_STREAM_ENDPOINT = `${ANTIGRAVITY_WIRE_ORIGIN}/v1internal:streamGenerateContent?alt=sse` as const
 export const ANTIGRAVITY_GENERATE_ENDPOINT = `${ANTIGRAVITY_WIRE_ORIGIN}/v1internal:generateContent` as const
 export const ANTIGRAVITY_AVAILABLE_MODELS_ENDPOINT = `${ANTIGRAVITY_WIRE_ORIGIN}/v1internal:fetchAvailableModels` as const
@@ -91,9 +98,13 @@ export interface AntigravityAdapterOptions {
   readonly responseHeaderTimeoutMs?: number
   readonly idleTimeoutMs?: number
   readonly totalTimeoutMs?: number
+  readonly maxRequestBytes?: number
   readonly maxResponseBytes?: number
   readonly maxFrameBytes?: number
-  readonly attachments?: Pick<AttachmentStore, 'readImage'>
+  readonly attachments?: Pick<AttachmentStore, 'readImage'> & {
+    readImageRequest?(ref: ImageAttachmentRef, bounds: unknown, signal?: AbortSignal): Promise<{ data: Uint8Array; mediaType: string }>
+  }
+  readonly fs?: Pick<FileSystem, 'processPathFromHostPath'>
 }
 
 interface ProviderPartText {
@@ -266,19 +277,36 @@ export class AntigravityAdapter extends LlmAdapter {
       }
       const sessionKey = requestSessionKey(options)
       const requestScope = this.sessions.beginRequest(sessionKey)
-      let payload: Record<string, unknown>
+      let payload: Record<string, unknown> & { sentImageBytes?: Map<string, number> }
       try {
-        payload = await buildAntigravityGeneratePayloadForAdapter(options, credential, requestScope.session, requestScope.timestamp, this.adapterOptions.attachments)
+        payload = await buildAntigravityGeneratePayloadForAdapter(options, credential, requestScope.session, requestScope.timestamp, this.adapterOptions.attachments, this.adapterOptions.fs)
       } catch (error) {
         if (error instanceof LlmError) throw error
         throw new LlmError('The Antigravity image input could not be admitted safely', 'UNSUPPORTED_MODALITY')
+      }
+      const sentImageBytes = payload.sentImageBytes
+      delete payload.sentImageBytes
+      const serialized = JSON.stringify(payload)
+      /** Images alone exceed the private route's inline image budget: negotiate a logged offload. */
+      const imageOffload = antigravityImageOffloadCount(options.messages, sentImageBytes)
+      if (imageOffload > 0) {
+        throw new LlmError(
+          `The Antigravity image payload exceeds the route image budget; offload ${String(imageOffload)} oldest retained image occurrence(s)`,
+          IMAGE_OFFLOAD_REQUIRED_CODE,
+          { offloadImages: imageOffload } as Record<string, unknown>,
+        )
+      }
+      /** Whole request exceeds the transport ceiling for reasons other than images: fail without blaming them. */
+      const requestBudget = boundedRequestBytes(this.adapterOptions.maxRequestBytes)
+      if (new TextEncoder().encode(serialized).byteLength > requestBudget) {
+        throw new LlmError('The Antigravity request exceeds the private transport byte limit', 'REQUEST_LIMIT')
       }
       let response: Response
       try {
         response = await this.transport.request({
           url: ANTIGRAVITY_STREAM_ENDPOINT,
           accessToken: credential.accessToken,
-          body: JSON.stringify(payload),
+          body: serialized,
           ...(signal === undefined ? {} : { signal }),
           responseHeaderTimeoutMs: this.options.responseHeaderTimeoutMs,
         })
@@ -779,11 +807,134 @@ function endBlock(state: BlockState): StreamChunk {
   }
 }
 
-export function buildAntigravityGeneratePayload(options: GenerateOptions, credential: HostCredential): Record<string, unknown> {
+/**
+ * Build the model-facing functionResponse payload.
+ * Gemini's FunctionResponse.response is a free-form Struct with no dedicated error
+ * field, so a failed tool result is reported under `error` and a successful one
+ * under `content`; both remain readable to the model.
+ */
+function toolResponsePayload(content: unknown, isError?: boolean): Record<string, unknown> {
+  return isError === true ? { error: content } : { content }
+}
+
+const IMAGE_OFFLOAD_REQUIRED_CODE = ((dshLlm as Record<string, unknown>).IMAGE_OFFLOAD_REQUIRED_CODE as string | undefined) ?? 'IMAGE_OFFLOAD_REQUIRED'
+
+function safeProjectOffloadedImages(messages: readonly Message[], placeholder: (ref: ImageAttachmentRef) => string): readonly Message[] {
+  if (typeof (dshLlm as Record<string, unknown>).projectOffloadedImages === 'function') {
+    return ((dshLlm as Record<string, unknown>).projectOffloadedImages as (msgs: readonly Message[], p: (ref: ImageAttachmentRef) => string) => readonly Message[])(messages, placeholder)
+  }
+  return messages.map(message => {
+    let replaced = false
+    const content = message.content.map(block => {
+      if (block.type === 'image' && (block as unknown as { offloaded?: boolean }).offloaded === true) {
+        replaced = true
+        return { type: 'text' as const, text: placeholder(block.attachment as ImageAttachmentRef) }
+      }
+      return block
+    })
+    return replaced ? { ...message, content } : message
+  })
+}
+
+function safeRequiredImageOffload(
+  messages: readonly Message[],
+  budget: { representation: string; maxBytes: number },
+  versionBytes: (block: unknown) => number,
+): number {
+  if (typeof (dshLlm as Record<string, unknown>).requiredImageOffload === 'function') {
+    return ((dshLlm as Record<string, unknown>).requiredImageOffload as (msgs: readonly Message[], b: typeof budget, vb: typeof versionBytes) => number)(messages, budget, versionBytes)
+  }
+  let totalBytes = 0
+  const imageSizes: number[] = []
+  for (const message of messages) {
+    for (const block of message.content) {
+      if (block.type === 'image' && (block as unknown as { offloaded?: boolean }).offloaded !== true) {
+        const raw = versionBytes(block)
+        const bytes = budget.representation === 'base64' ? Math.ceil(raw * 4 / 3) : raw
+        totalBytes += bytes
+        imageSizes.push(bytes)
+      }
+    }
+  }
+  let count = 0
+  let excess = totalBytes - budget.maxBytes
+  for (const size of imageSizes) {
+    if (excess <= 0) break
+    count += 1
+    excess -= size
+  }
+  return count
+}
+
+function safeOffloadedImageText(ref: ImageAttachmentRef, access: unknown): string {
+  if (typeof (dshLlm as Record<string, unknown>).offloadedImageText === 'function') {
+    return ((dshLlm as Record<string, unknown>).offloadedImageText as (r: ImageAttachmentRef, a: unknown) => string)(ref, access)
+  }
+  const name = ref.name !== undefined ? `${JSON.stringify(ref.name)} (${ref.attachmentId})` : String(ref.attachmentId)
+  return `[image omitted to fit request image limits; ${name}.]`
+}
+
+function safeResolveImageAttachmentAccess(
+  attachments: Pick<AttachmentStore, 'readImage'> | undefined,
+  mapHostPath: (hostPath: string) => string | undefined,
+  ref: ImageAttachmentRef,
+): unknown {
+  if (attachments === undefined) return undefined
+  if (typeof (dshLlm as Record<string, unknown>).resolveImageAttachmentAccess === 'function') {
+    return ((dshLlm as Record<string, unknown>).resolveImageAttachmentAccess as Function)(attachments, mapHostPath, ref)
+  }
+  const hostPath = (attachments as unknown as { imageHostPath?(r: ImageAttachmentRef): string | undefined }).imageHostPath?.(ref)
+  if (hostPath === undefined) return undefined
+  const readonlyPath = mapHostPath(hostPath)
+  return readonlyPath === undefined ? undefined : { readonlyPath }
+}
+
+function boundedRequestBytes(value: number | undefined): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : DEFAULT_PRIVATE_REQUEST_BYTES
+}
+
+/**
+ * Oldest-first image count the private route must offload before its image payload fits.
+ * Uses the Host's own image-only budget instead of blaming total request bytes on images.
+ */
+function antigravityImageOffloadCount(messages: readonly Message[], sentBytes: ReadonlyMap<string, number> | undefined): number {
+  return safeRequiredImageOffload(messages, {
+    representation: 'base64',
+    maxBytes: ANTIGRAVITY_INLINE_IMAGE_BYTES,
+  }, (block: unknown) => {
+    const attachment = isRecord(block) && isRecord((block as Record<string, unknown>).attachment) ? ((block as Record<string, unknown>).attachment as Record<string, unknown>) : undefined
+    const attachmentId = attachment && typeof attachment.attachmentId === 'string' ? attachment.attachmentId : undefined
+    const sent = attachmentId === undefined ? undefined : sentBytes?.get(attachmentId)
+    if (typeof sent === 'number') return sent
+    return attachment && typeof attachment.bytes === 'number' ? attachment.bytes : 0
+  })
+}
+
+/** Resolve a read-only execution-world path so an offloaded image stays recoverable by tools. */
+function resolveAntigravityImageAccess(
+  attachments: Pick<AttachmentStore, 'readImage'> | undefined,
+  fs: Pick<FileSystem, 'processPathFromHostPath'> | undefined,
+  ref: ImageAttachmentRef,
+): unknown {
+  if (attachments === undefined || fs === undefined) return undefined
+  try {
+    return safeResolveImageAttachmentAccess(attachments, (hostPath: string) => fs.processPathFromHostPath(hostPath), ref)
+  } catch {
+    return undefined
+  }
+}
+
+export function buildAntigravityGeneratePayload(
+  options: GenerateOptions,
+  credential: HostCredential,
+  attachments?: Pick<AttachmentStore, 'readImage'>,
+  fs?: Pick<FileSystem, 'processPathFromHostPath'>,
+): Record<string, unknown> {
   const toolNames = new Map<string, string>()
-  const contents = options.messages
-    .filter(message => message.role !== 'system')
-    .map(message => mapMessage(message, options.model, toolNames))
+  const history = safeProjectOffloadedImages(options.messages, (ref: ImageAttachmentRef) => safeOffloadedImageText(ref, resolveAntigravityImageAccess(attachments, fs, ref)))
+  const contents = (history as readonly Message[])
+    .filter((message: Message) => message.role !== 'system')
+    .map((message: Message) => mapMessage(message, options.model, toolNames))
   return buildPayloadFromContents(options, credential, contents)
 }
 
@@ -792,13 +943,19 @@ async function buildAntigravityGeneratePayloadForAdapter(
   credential: HostCredential,
   session: Parameters<typeof buildAgyAgentRequestMetadata>[0],
   timestamp: number,
-  attachments: Pick<AttachmentStore, 'readImage'> | undefined,
-): Promise<Record<string, unknown>> {
+  attachments: (Pick<AttachmentStore, 'readImage'> & {
+    readImageRequest?(ref: ImageAttachmentRef, bounds: unknown, signal?: AbortSignal): Promise<{ data: Uint8Array; mediaType: string }>
+  }) | undefined,
+  fs?: Pick<FileSystem, 'processPathFromHostPath'>,
+): Promise<Record<string, unknown> & { sentImageBytes?: Map<string, number> }> {
+  /** Downscaled byte length actually sent per attachment; requiredImageOffload applies base64Length itself. */
+  const sentImageBytes = new Map<string, number>()
   const contents: Record<string, unknown>[] = []
   const toolNames = new Map<string, string>()
-  for (const message of options.messages) {
+  const history = safeProjectOffloadedImages(options.messages, (ref: ImageAttachmentRef) => safeOffloadedImageText(ref, resolveAntigravityImageAccess(attachments, fs, ref)))
+  for (const message of (history as readonly Message[])) {
     if (message.role === 'system') continue
-    contents.push(await mapMessageWithAttachments(message, options.model, toolNames, attachments, options.signal))
+    contents.push(await mapMessageWithAttachments(message, options.model, toolNames, attachments, options.signal, sentImageBytes))
   }
   const payload = buildPayloadFromContents(options, credential, contents)
   const metadata = buildAgyAgentRequestMetadata(session, payload.request as Record<string, unknown>, resolveWireModel(options.model, options.reasoningEffort), timestamp)
@@ -813,6 +970,7 @@ async function buildAntigravityGeneratePayloadForAdapter(
     model: payload.model,
     userAgent: 'antigravity',
     requestType: 'agent',
+    sentImageBytes,
   }
 }
 
@@ -978,6 +1136,22 @@ function mapMessage(message: Message, model: string, toolNames: Map<string, stri
   const replayBlocks = replay?.blocks ?? []
   const isClaude = antigravityModelFamily(model) === 'claude'
   let replayIndex = 0
+  /** A tool message answers one call; emit that response once and keep any remaining blocks. */
+  let emittedToolResponse = false
+  if ((message as unknown as { role?: string }).role === 'tool' && typeof (message as unknown as { toolCallId?: string }).toolCallId === 'string' && ((message as unknown as { toolCallId: string }).toolCallId.length > 0)) {
+    const toolCallId = requireToolCallId((message as unknown as { toolCallId: string }).toolCallId)
+    const toolName = toolNames.get(toolCallId)
+    if (toolName !== undefined) {
+      emittedToolResponse = true
+      parts.push({
+        functionResponse: {
+          ...(isClaude ? { id: toolCallId } : {}),
+          name: toolName,
+          response: toolResponsePayload(blocksToText(message.content), (message as unknown as { isError?: boolean }).isError),
+        },
+      })
+    }
+  }
   let sawClaudeFunctionCall = false
   for (const block of message.content) {
     const replayKind = block.type === 'text' || block.type === 'reasoning' || block.type === 'tool-call' ? block.type : undefined
@@ -987,6 +1161,8 @@ function mapMessage(message: Message, model: string, toolNames: Map<string, stri
       ?? (block as unknown as { signature?: string; thoughtSignature?: string }).thoughtSignature
       ?? replaySignature
     if (block.type === 'text') {
+      /** Text already reached the model through the tool response above. */
+      if (emittedToolResponse) continue
       if (block.text.length === 0 && message.content.length > 1) continue
       parts.push({ text: block.text, ...(blockSignature === undefined ? {} : { thoughtSignature: blockSignature }) })
     } else if (block.type === 'reasoning') {
@@ -995,7 +1171,7 @@ function mapMessage(message: Message, model: string, toolNames: Map<string, stri
     } else if (block.type === 'tool-call') {
       const callId = rememberToolName(toolNames, block.id, block.name)
       const signature = isClaude
-        ? sawClaudeFunctionCall ? undefined : blockSignature ?? SKIP_THOUGHT_SIGNATURE
+        ? (sawClaudeFunctionCall ? undefined : (blockSignature ?? SKIP_THOUGHT_SIGNATURE))
         : blockSignature
       sawClaudeFunctionCall ||= isClaude
       parts.push({
@@ -1012,7 +1188,7 @@ function mapMessage(message: Message, model: string, toolNames: Map<string, stri
         functionResponse: {
           ...(isClaude ? { id: callId } : {}),
           name: requireToolName(toolNames, callId),
-          response: { content: blocksToText(block.content) },
+          response: toolResponsePayload(blocksToText(block.content), block.isError),
         },
       })
     } else if (block.type === 'image') {
@@ -1029,8 +1205,11 @@ async function mapMessageWithAttachments(
   message: Message,
   model: string,
   toolNames: Map<string, string>,
-  attachments: Pick<AttachmentStore, 'readImage'> | undefined,
+  attachments: (Pick<AttachmentStore, 'readImage'> & {
+    readImageRequest?(ref: ImageAttachmentRef, bounds: unknown, signal?: AbortSignal): Promise<{ data: Uint8Array; mediaType: string }>
+  }) | undefined,
   signal: AbortSignal | undefined,
+  sentImageBytes?: Map<string, number>,
 ): Promise<Record<string, unknown>> {
   if (!message.content.some(block => block.type === 'image')) return mapMessage(message, model, toolNames)
   if (attachments === undefined) throw new LlmError('Antigravity image input requires the Host AttachmentStore', 'UNSUPPORTED_MODALITY')
@@ -1039,6 +1218,22 @@ async function mapMessageWithAttachments(
   const parts: Record<string, unknown>[] = []
   const isClaude = antigravityModelFamily(model) === 'claude'
   let replayIndex = 0
+  /** A tool message answers one call; emit that response once and keep any remaining blocks. */
+  let emittedToolResponse = false
+  if ((message as unknown as { role?: string }).role === 'tool' && typeof (message as unknown as { toolCallId?: string }).toolCallId === 'string' && ((message as unknown as { toolCallId: string }).toolCallId.length > 0)) {
+    const toolCallId = requireToolCallId((message as unknown as { toolCallId: string }).toolCallId)
+    const toolName = toolNames.get(toolCallId)
+    if (toolName !== undefined) {
+      emittedToolResponse = true
+      parts.push({
+        functionResponse: {
+          ...(isClaude ? { id: toolCallId } : {}),
+          name: toolName,
+          response: toolResponsePayload(blocksToText(message.content), (message as unknown as { isError?: boolean }).isError),
+        },
+      })
+    }
+  }
   let sawClaudeFunctionCall = false
   for (const block of message.content) {
     const replayKind = block.type === 'text' || block.type === 'reasoning' || block.type === 'tool-call' ? block.type : undefined
@@ -1048,9 +1243,27 @@ async function mapMessageWithAttachments(
       ?? (block as unknown as { signature?: string; thoughtSignature?: string }).thoughtSignature
       ?? replaySignature
     if (block.type === 'image') {
-      const stored = await attachments.readImage(block.attachment as never, signal)
-      parts.push({ inlineData: { mimeType: stored.ref.mediaType, data: Buffer.from(stored.data).toString('base64') } })
+      const ref = block.attachment as ImageAttachmentRef
+      let mediaType: string
+      let encoded: string
+      if (typeof attachments.readImageRequest === 'function') {
+        const stored = await attachments.readImageRequest(ref, {
+          ...requestImageDimensions(ref.width, ref.height, ANTIGRAVITY_REQUEST_IMAGE_MAX_PIXELS),
+          maxBytes: ANTIGRAVITY_REQUEST_IMAGE_MAX_BYTES,
+        }, signal)
+        mediaType = stored.mediaType
+        encoded = Buffer.from(stored.data).toString('base64')
+        sentImageBytes?.set(ref.attachmentId, stored.data.byteLength)
+      } else {
+        const stored = await attachments.readImage(ref as never, signal)
+        mediaType = stored.ref.mediaType
+        encoded = Buffer.from(stored.data).toString('base64')
+        sentImageBytes?.set(ref.attachmentId, stored.data.byteLength)
+      }
+      parts.push({ inlineData: { mimeType: mediaType, data: encoded } })
     } else if (block.type === 'text') {
+      /** Text already reached the model through the tool response above. */
+      if (emittedToolResponse) continue
       if (block.text.length === 0 && message.content.length > 1) continue
       parts.push({ text: block.text, ...(blockSignature === undefined ? {} : { thoughtSignature: blockSignature }) })
     } else if (block.type === 'reasoning') {
@@ -1059,7 +1272,7 @@ async function mapMessageWithAttachments(
     } else if (block.type === 'tool-call') {
       const callId = rememberToolName(toolNames, block.id, block.name)
       const signature = isClaude
-        ? sawClaudeFunctionCall ? undefined : blockSignature ?? SKIP_THOUGHT_SIGNATURE
+        ? (sawClaudeFunctionCall ? undefined : (blockSignature ?? SKIP_THOUGHT_SIGNATURE))
         : blockSignature
       sawClaudeFunctionCall ||= isClaude
       parts.push({
@@ -1076,7 +1289,7 @@ async function mapMessageWithAttachments(
         functionResponse: {
           ...(isClaude ? { id: callId } : {}),
           name: requireToolName(toolNames, callId),
-          response: { content: blocksToText(block.content) },
+          response: toolResponsePayload(blocksToText(block.content), block.isError),
         },
       })
     }
