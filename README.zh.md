@@ -5,7 +5,7 @@
 [![npm version](https://img.shields.io/npm/v/dsh-tool-antigravity.svg?color=blue)](https://www.npmjs.com/package/dsh-tool-antigravity)
 [![license](https://img.shields.io/github/license/Jaylor-Wang/dsh-tool-antigravity.svg)](LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/Jaylor-Wang/dsh-tool-antigravity.svg)](https://github.com/Jaylor-Wang/dsh-tool-antigravity/releases)
-[![Tests](https://img.shields.io/badge/tests-38%20suites%20%7C%20404%20passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-38%20suites%20%7C%20415%20passed-brightgreen.svg)](tests/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Strict%20Types-blue.svg)](tsconfig.json)
 
 为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) 打造的高性能 Antigravity 核心能力包插件。
@@ -14,19 +14,19 @@
 
 ---
 
-## v0.4.0 版本重要更新 (工具 Schema 加固、响应错误契约与图片协商卸载)
+## v0.4.1 版本重要更新 (工具调用 ID 冲突恢复、网络韧性重试与签名加固)
 
-- **工具 Schema 加固与清洗**：自动过滤 Schema 中导致 Google Cloud Code 报 400 Bad Request 的空字符串枚举值（`enum: [""]`），并将核心工具优先置顶、容量上限扩展至 384。
-- **精准工具错误契约与去重**：统一将工具执行失败写入 `response.error` 契约，彻底消除多轮对话中重复投递的冗余工具响应文本块。
-- **多智能体图片智能卸载协商**：引入单图 4MP / 1MB 及整包 12MB 的严格传输预算校验，超出时触发 `IMAGE_OFFLOAD_REQUIRED_CODE` 协同客户端完成文件落盘与引用卸载。
-- **完整保留 v0.3.6 核心能力**：开箱即用多账号池管理、模型推理 429 自动冷却与无感轮换、Gemini/Claude 独立模型游标隔离、设置面板可视化管理与 Scoped HTTPS 代理作用域隔离。
+- **Provider 工具调用 ID 重用自愈**：通过建立 `ToolCallState` 状态机跟踪调用，对跨轮次重用的 Provider 工具调用 ID 实施确定性后缀命名（`${id}#${name}`），配合 FIFO 结果配对与助理轮次未完成调用过期回收，彻底杜绝多轮长会话中 `INVALID_ARGS` 导致的永久卡死。
+- **瞬态网络重试扩容与错误契约对齐**：针对 pre-delta 阶段的网络抖动及 502/503/504 错误，升级为最多 3 次指数退避重试（1s / 2s / 4s）；并将网络异常代码由 `NETWORK` 统一修正为符合 DSH Host 重试规范的 `TRANSPORT`。
+- **全系模型思考签名机制加固**：针对 Gemini / 非 Claude 模型在缺失签名时会被 Google 云端 400 `INVALID_ARGUMENT` 拒绝的问题，为所有未签名的 `functionCall` 补全 `SKIP_THOUGHT_SIGNATURE` 官方哨兵值，彻底解决 400 协议漂移报错。
+- **完整保留 v0.4.0 核心能力**：工具 Schema 清洗过滤空值 enum、核心工具置顶扩容至 384、`response.error` 契约与多智能体 12MB 图片智能卸载协商。
 ## 核心特性与架构设计
 
 ### 1. 高性能底层架构
 - **底层长连接池（TLS Socket Keep-Alive）与会话复用**：内置 HTTP/1.1 长连接池与 TLS 票据复用机制，彻底消除逐请求建立 TLS 握手的固有延迟，显著降低首字响应时间（TTFT）。
 - **高吞吐 Buffer 游标滑动 SSE 解析**：在二进制 Buffer 字节层精确定位换行符并切片解码，彻底消除流式推理时高频字符串累加带来的 V8 堆内存重新分配与 GC 抖动。
 - **细粒度思考预算调控**：全面支持 Gemini 3.8/3.7/3.6 Flash、Gemini 3.1 Pro 与 Claude 系列模型的思维链深度配置（`low`, `medium`, `high`）。
-- **前置幂等断线自愈**：在流式首字节发出前遇到瞬时网络异常（如 TLS RST / 502 / 503）时自动平滑重试 1 次，提升模型生成稳定性。
+- **前置幂等断线自愈**：在流式首字节发出前遇到瞬时网络异常（如 TLS RST / 502 / 503 / 504）时自动平滑重试最多 3 次，提升模型生成稳定性。
 - **Windows 文件锁活性探测**：引入 `process.kill(pid, 0)` 探测，若持有锁的外部进程已异常退出，立即主动回收锁，杜绝 30 秒卡死等待。
 - **配额看板 SWR 容错与微光动效**：重构 5 小时与每周配额解析算法，解决窗口周期判断漂移问题；在接口波动时展示缓存数据与微光动效。
 

@@ -5,7 +5,7 @@ English | [中文](README.zh.md)
 [![npm version](https://img.shields.io/npm/v/dsh-tool-antigravity.svg?color=blue)](https://www.npmjs.com/package/dsh-tool-antigravity)
 [![license](https://img.shields.io/github/license/Jaylor-Wang/dsh-tool-antigravity.svg)](LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/Jaylor-Wang/dsh-tool-antigravity.svg)](https://github.com/Jaylor-Wang/dsh-tool-antigravity/releases)
-[![Tests](https://img.shields.io/badge/tests-38%20suites%20%7C%20404%20passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-38%20suites%20%7C%20415%20passed-brightgreen.svg)](tests/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Strict%20Types-blue.svg)](tsconfig.json)
 
 High-performance, streamlined Antigravity capability bundle plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH).
@@ -14,19 +14,19 @@ Provides private Google OAuth 2.0 PKCE authentication, multi-model LLM routing (
 
 ---
 
-## Highlights in v0.4.0 (Tool Schema Hardening, Response Error Semantics & Image Offloading)
+## Highlights in v0.4.1 (Tool-Call ID Recovery, Network Resiliency & Thought Signature Hardening)
 
-- **Tool Schema Hardening & Sanitization**: Prunes empty string `enum` values to prevent Google Cloud Code 400 Bad Request rejections, and prioritizes core harness tools with capacity expanded up to 384 tools.
-- **Precise Tool Error Semantics**: Accurately reports tool execution failures under `response.error` across all model families, while deduplicating redundant tool responses.
-- **Multi-Agent Image Offloading**: Enforces strict transport payload budgets (12MB total transport limit, 4MP / 1MB image limits) and transparently negotiates client offloading using `IMAGE_OFFLOAD_REQUIRED_CODE`.
-- **Retains v0.3.6 capabilities**: Out-of-the-box multi-account pool (`multiAccount: true`), quota-driven automatic rotation on LLM 429, per-model-family cursor isolation, visual settings panel, and scoped proxy isolation.
+- **Provider Tool-Call ID Reuse Recovery**: Eliminates fatal `INVALID_ARGS` session lockouts in long turns by tracking provider tool-call states, deterministically suffixing conflicting IDs (`${id}#${name}`), FIFO result pairing, and assistant-turn unfulfilled call expiry.
+- **Resilient Network Retry & Contract Alignment**: Retries transient network interruptions and 502/503/504 status codes up to 3 times with exponential backoff (1s / 2s / 4s) before byte emission, mapping transport errors to the standard `TRANSPORT` code adhering to DSH Host retry contract.
+- **Universal Thought Signature Enforcement**: Resolves private endpoint 400 `INVALID_ARGUMENT` rejections by ensuring all Gemini/non-Claude and initial Claude `functionCall` parts carry valid thought signatures or the `SKIP_THOUGHT_SIGNATURE` sentinel.
+- **Retains v0.4.0 capabilities**: Core tools prioritization (up to 384 tools), schema enum sanitization, `response.error` error semantics, and multi-agent image offloading.
 ## Features
 
 ### 1. High-Performance Core Architecture
 - **TLS Connection Pooling & Session Resumption**: Built-in HTTP/1.1 Keep-Alive socket pool and TLS session resumption against Google endpoints, eliminating repeated TLS handshake roundtrips and significantly reducing Time-To-First-Token (TTFT).
 - **Sliding-Window Buffer SSE Parser**: High-throughput binary chunking directly locates newline separators on raw Buffers, bypassing heavy string concatenations and drastically reducing V8 heap allocations and GC spikes during long reasoning chains.
 - **Granular Thinking Budgets**: Fine-grained reasoning effort configuration (`low`, `medium`, `high`) across Gemini and Claude models with graceful fallbacks.
-- **Pre-flight Idempotent Retry**: Automatically retries transient network interruptions (e.g. TLS RST / 502 / 503) once prior to first byte emission.
+- **Pre-flight Idempotent Retry**: Automatically retries transient network interruptions (e.g. TLS RST / 502 / 503 / 504) up to 3 times with exponential backoff prior to first byte emission.
 - **Windows File Lock Recovery**: Active PID probing (`process.kill(pid, 0)`) detects stale locks from crashed processes and immediately frees them, preventing 30-second hang timeouts.
 - **Stale-While-Revalidate (SWR) Quota Resilience**: Robust quota normalization supporting 5h and weekly windows; retains and displays last-known valid quota with smooth shimmer animations during transient network disruptions.
 
