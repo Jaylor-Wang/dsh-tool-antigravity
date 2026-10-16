@@ -961,35 +961,44 @@ describe('Antigravity LLM adapter', () => {
     ] }), credential('access'))
     const contents = (payload.request as { contents: Array<{ parts: unknown[] }> }).contents
 
-    expect(contents[0]?.parts).toEqual([{ functionCall: { name: 'grep', args: { pattern: 'a' } } }])
+    const sentinel = { thoughtSignature: 'skip_thought_signature_validator' }
+    expect(contents[0]?.parts).toEqual([{ functionCall: { name: 'grep', args: { pattern: 'a' } }, ...sentinel }])
     expect(contents[1]?.parts).toEqual([{ functionResponse: { name: 'grep', response: { content: 'hit' } } }])
-    expect(contents[2]?.parts).toEqual([{ functionCall: { name: 'edit', args: { file: 'b' } } }])
+    expect(contents[2]?.parts).toEqual([{ functionCall: { name: 'edit', args: { file: 'b' } }, ...sentinel }])
     expect(contents[3]?.parts).toEqual([{ functionResponse: { name: 'edit', response: { content: 'written' } } }])
   })
 
-  it('omits the thought signature for non-Claude tool calls while keeping the Claude sentinel', () => {
-    const assistant = (model: string, names: readonly string[]): Message => ({
+  it('falls back to the sentinel for unsigned non-Claude tool calls and keeps real signatures', () => {
+    const assistant = (model: string, blocks: ReadonlyArray<Record<string, unknown>>): Message => ({
       id: `assistant-${model}` as never,
       role: 'assistant',
       source: { kind: 'model', provider: ANTIGRAVITY_PROVIDER, model },
-      content: names.map((name, index) => ({ type: 'tool-call', id: `call-${String(index)}` as never, name, arguments: '{}' })) as never,
+      content: blocks as never,
     })
 
-    /** No replay state and no block signature: the non-Claude family must not receive the sentinel. */
+    /**
+     * The endpoint answers 400 INVALID_ARGUMENT for any functionCall part without a
+     * thought_signature, so an unsigned non-Claude call must carry the sentinel.
+     */
     const gemini = buildAntigravityGeneratePayload(options({
       model: 'antigravity-gemini-3.8-flash',
-      messages: [assistant('antigravity-gemini-3.8-flash', ['grep', 'edit'])],
+      messages: [assistant('antigravity-gemini-3.8-flash', [
+        { type: 'tool-call', id: 'call-0', name: 'grep', arguments: '{}' },
+        { type: 'tool-call', id: 'call-1', name: 'edit', arguments: '{}', signature: 'model-signed-value' },
+      ])],
     }), credential('access'))
     const geminiParts = (gemini.request as { contents: Array<{ parts: Array<Record<string, unknown>> }> }).contents[0]?.parts ?? []
     expect(geminiParts).toEqual([
-      { functionCall: { name: 'grep', args: {} } },
-      { functionCall: { name: 'edit', args: {} } },
+      { functionCall: { name: 'grep', args: {} }, thoughtSignature: 'skip_thought_signature_validator' },
+      { functionCall: { name: 'edit', args: {} }, thoughtSignature: 'model-signed-value' },
     ])
-    expect(geminiParts.every(part => !('thoughtSignature' in part))).toBe(true)
 
     const claude = buildAntigravityGeneratePayload(options({
       model: 'antigravity-claude-opus-4-6-thinking',
-      messages: [assistant('antigravity-claude-opus-4-6-thinking', ['grep', 'edit'])],
+      messages: [assistant('antigravity-claude-opus-4-6-thinking', [
+        { type: 'tool-call', id: 'call-0', name: 'grep', arguments: '{}' },
+        { type: 'tool-call', id: 'call-1', name: 'edit', arguments: '{}' },
+      ])],
     }), credential('access'))
     const claudeParts = (claude.request as { contents: Array<{ parts: Array<Record<string, unknown>> }> }).contents[0]?.parts ?? []
     expect(claudeParts[0]).toEqual({ functionCall: { id: 'call-0', name: 'grep', args: {} }, thoughtSignature: 'skip_thought_signature_validator' })

@@ -1177,9 +1177,8 @@ function mapMessage(message: Message, model: string, toolNames: Map<string, Tool
       parts.push({ text: block.text, thought: true, ...(blockSignature === undefined ? {} : { thoughtSignature: blockSignature }) })
     } else if (block.type === 'tool-call') {
       const callId = rememberToolName(toolNames, block.id, block.name)
-      const signature = isClaude
-        ? (sawClaudeFunctionCall ? undefined : (blockSignature ?? SKIP_THOUGHT_SIGNATURE))
-        : blockSignature
+      /** Every family needs a signature here: the endpoint rejects unsigned functionCall parts with 400 INVALID_ARGUMENT. */
+      const signature = isClaude && sawClaudeFunctionCall ? undefined : (blockSignature ?? SKIP_THOUGHT_SIGNATURE)
       sawClaudeFunctionCall ||= isClaude
       parts.push({
         functionCall: {
@@ -1283,9 +1282,8 @@ async function mapMessageWithAttachments(
       parts.push({ text: block.text, thought: true, ...(blockSignature === undefined ? {} : { thoughtSignature: blockSignature }) })
     } else if (block.type === 'tool-call') {
       const callId = rememberToolName(toolNames, block.id, block.name)
-      const signature = isClaude
-        ? (sawClaudeFunctionCall ? undefined : (blockSignature ?? SKIP_THOUGHT_SIGNATURE))
-        : blockSignature
+      /** Every family needs a signature here: the endpoint rejects unsigned functionCall parts with 400 INVALID_ARGUMENT. */
+      const signature = isClaude && sawClaudeFunctionCall ? undefined : (blockSignature ?? SKIP_THOUGHT_SIGNATURE)
       sawClaudeFunctionCall ||= isClaude
       parts.push({
         functionCall: {
