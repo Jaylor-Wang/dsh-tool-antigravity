@@ -547,6 +547,40 @@ describe('Antigravity LLM adapter', () => {
     expect(chunks.some(chunk => chunk.type === 'text-delta' && chunk.text === 'recovered-503')).toBe(true)
   })
 
+  it('retries up to 3 times with exponential backoff on consecutive transient network interruptions', async () => {
+    const transport = {
+      request: vi.fn()
+        .mockRejectedValueOnce(new PrivateTransportError('offline', 'The private endpoint closed before response headers', { accepted: false }))
+        .mockRejectedValueOnce(new PrivateTransportError('offline', 'The private endpoint could not be reached', { accepted: false }))
+        .mockResolvedValueOnce(new Response('data: {"response":{"parts":[{"text":"recovered-multi"}],"finishReason":"STOP"}}\n\n')),
+    }
+    const auth = { credential: vi.fn(async () => credential('token')) }
+    const adapter = new AntigravityAdapter({ auth, transport })
+    const chunks: StreamChunk[] = []
+    for await (const chunk of adapter.stream(options())) chunks.push(chunk)
+    expect(transport.request).toHaveBeenCalledTimes(3)
+    expect(chunks.some(chunk => chunk.type === 'text-delta' && chunk.text === 'recovered-multi')).toBe(true)
+  })
+
+  it('fails with TRANSPORT error code matching DSH host retry contract when network retries are exhausted', async () => {
+    const transport = {
+      request: vi.fn()
+        .mockRejectedValue(new PrivateTransportError('offline', 'The private endpoint could not be reached', { accepted: false })),
+    }
+    const auth = { credential: vi.fn(async () => credential('token')) }
+    const adapter = new AntigravityAdapter({ auth, transport })
+    let caught: any
+    try {
+      for await (const _chunk of adapter.stream(options())) { /* empty */ }
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).toBeDefined()
+    expect(caught.code).toBe('TRANSPORT')
+    expect(caught.message).toContain('failed safely (TRANSPORT)')
+    expect(transport.request).toHaveBeenCalledTimes(4)
+  }, 15000)
+
   it('rotates to next account and retries after a pre-delta 429 rate limit response', async () => {
     const transport = {
       request: vi.fn()

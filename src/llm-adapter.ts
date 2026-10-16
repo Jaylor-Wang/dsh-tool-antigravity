@@ -172,8 +172,8 @@ export class AntigravityAdapter extends LlmAdapter {
   }
 
   override providerRetryPolicy(): ReturnType<typeof resolveRetryPolicy> {
-    // Generation dispatch is never retried by this adapter; a normal runtime
-    // retry policy must not dispatch the same metered request a second time.
+    // This adapter already retries transient network failures internally, so the
+    // runtime policy stays at zero to avoid dispatching one metered request twice.
     return resolveRetryPolicy({ mode: 'normal', maxRetries: 0 }, 'google-antigravity')
   }
 
@@ -267,7 +267,8 @@ export class AntigravityAdapter extends LlmAdapter {
     const family = antigravityModelFamily(options.model)
     const hasEmitted = { value: false }
     let replayed = false
-    let retriedNetwork = false
+    let networkRetryCount = 0
+    const MAX_NETWORK_RETRIES = 3
     let rotationAttempts = 0
     const maxRotations = await this.rotationBudget()
     for (;;) {
@@ -311,9 +312,10 @@ export class AntigravityAdapter extends LlmAdapter {
           responseHeaderTimeoutMs: this.options.responseHeaderTimeoutMs,
         })
       } catch (error) {
-        if (!retriedNetwork && !hasEmitted.value && !isAborted(signal) && isRetryableNetworkError(error)) {
-          retriedNetwork = true
-          await waitRetryBackoff(500, signal)
+        if (networkRetryCount < MAX_NETWORK_RETRIES && !hasEmitted.value && !isAborted(signal) && isRetryableNetworkError(error)) {
+          networkRetryCount += 1
+          const backoffMs = Math.min(1000 * Math.pow(2, networkRetryCount - 1), 4000)
+          await waitRetryBackoff(backoffMs, signal)
           continue
         }
         throw toLlmError(error)
@@ -333,10 +335,11 @@ export class AntigravityAdapter extends LlmAdapter {
             continue
           }
         }
-        if ((response.status === 502 || response.status === 503 || response.status === 504) && !retriedNetwork && !hasEmitted.value && !isAborted(signal)) {
+        if ((response.status === 502 || response.status === 503 || response.status === 504) && networkRetryCount < MAX_NETWORK_RETRIES && !hasEmitted.value && !isAborted(signal)) {
           await cancelResponse(response)
-          retriedNetwork = true
-          await waitRetryBackoff(500, signal)
+          networkRetryCount += 1
+          const backoffMs = Math.min(1000 * Math.pow(2, networkRetryCount - 1), 4000)
+          await waitRetryBackoff(backoffMs, signal)
           continue
         }
         if (response.status === 400 && await responseReportsContextWindowExceeded(response, {
@@ -368,9 +371,10 @@ export class AntigravityAdapter extends LlmAdapter {
             continue
           }
         }
-        if (!retriedNetwork && !hasEmitted.value && !isAborted(signal) && isRetryableNetworkError(error)) {
-          retriedNetwork = true
-          await waitRetryBackoff(500, signal)
+        if (networkRetryCount < MAX_NETWORK_RETRIES && !hasEmitted.value && !isAborted(signal) && isRetryableNetworkError(error)) {
+          networkRetryCount += 1
+          const backoffMs = Math.min(1000 * Math.pow(2, networkRetryCount - 1), 4000)
+          await waitRetryBackoff(backoffMs, signal)
           continue
         }
         throw toLlmError(error)
@@ -1617,7 +1621,7 @@ const LLM_FAILURE_CODES: Readonly<Record<PrivateFailureKind, string>> = {
   'response-limit': 'RESPONSE_LIMIT',
   'request-limit': 'REQUEST_LIMIT',
   upstream: 'UPSTREAM',
-  network: 'NETWORK',
+  network: 'TRANSPORT',
   failed: 'PROVIDER_ERROR',
 }
 
@@ -1628,7 +1632,7 @@ function canFallBackToPinnedTextSnapshot(error: unknown): boolean {
     || error.code === 'PROTOCOL_DRIFT'
     || error.code === 'RESPONSE_LIMIT'
     || error.code === 'UPSTREAM'
-    || error.code === 'NETWORK'
+    || error.code === 'TRANSPORT'
 }
 
 function toModelCatalogError(
