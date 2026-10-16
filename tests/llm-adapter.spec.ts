@@ -967,6 +967,35 @@ describe('Antigravity LLM adapter', () => {
     expect(contents[3]?.parts).toEqual([{ functionResponse: { name: 'edit', response: { content: 'written' } } }])
   })
 
+  it('omits the thought signature for non-Claude tool calls while keeping the Claude sentinel', () => {
+    const assistant = (model: string, names: readonly string[]): Message => ({
+      id: `assistant-${model}` as never,
+      role: 'assistant',
+      source: { kind: 'model', provider: ANTIGRAVITY_PROVIDER, model },
+      content: names.map((name, index) => ({ type: 'tool-call', id: `call-${String(index)}` as never, name, arguments: '{}' })) as never,
+    })
+
+    /** No replay state and no block signature: the non-Claude family must not receive the sentinel. */
+    const gemini = buildAntigravityGeneratePayload(options({
+      model: 'antigravity-gemini-3.8-flash',
+      messages: [assistant('antigravity-gemini-3.8-flash', ['grep', 'edit'])],
+    }), credential('access'))
+    const geminiParts = (gemini.request as { contents: Array<{ parts: Array<Record<string, unknown>> }> }).contents[0]?.parts ?? []
+    expect(geminiParts).toEqual([
+      { functionCall: { name: 'grep', args: {} } },
+      { functionCall: { name: 'edit', args: {} } },
+    ])
+    expect(geminiParts.every(part => !('thoughtSignature' in part))).toBe(true)
+
+    const claude = buildAntigravityGeneratePayload(options({
+      model: 'antigravity-claude-opus-4-6-thinking',
+      messages: [assistant('antigravity-claude-opus-4-6-thinking', ['grep', 'edit'])],
+    }), credential('access'))
+    const claudeParts = (claude.request as { contents: Array<{ parts: Array<Record<string, unknown>> }> }).contents[0]?.parts ?? []
+    expect(claudeParts[0]).toEqual({ functionCall: { id: 'call-0', name: 'grep', args: {} }, thoughtSignature: 'skip_thought_signature_validator' })
+    expect(claudeParts[1]).toEqual({ functionCall: { id: 'call-1', name: 'edit', args: {} } })
+  })
+
   it('suffixes a reused Claude call id deterministically so two rebuilds stay identical', () => {
     const model = 'antigravity-claude-opus-4-6-thinking'
     const reusedCallId = 'call_332562'
