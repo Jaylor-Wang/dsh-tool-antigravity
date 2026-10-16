@@ -172,8 +172,8 @@ export class AntigravityAdapter extends LlmAdapter {
   }
 
   override providerRetryPolicy(): ReturnType<typeof resolveRetryPolicy> {
-    // Generation dispatch is never retried by this adapter; a normal runtime
-    // retry policy must not dispatch the same metered request a second time.
+    // This adapter already retries transient network failures internally, so the
+    // runtime policy stays at zero to avoid dispatching one metered request twice.
     return resolveRetryPolicy({ mode: 'normal', maxRetries: 0 }, 'google-antigravity')
   }
 
@@ -267,7 +267,8 @@ export class AntigravityAdapter extends LlmAdapter {
     const family = antigravityModelFamily(options.model)
     const hasEmitted = { value: false }
     let replayed = false
-    let retriedNetwork = false
+    let networkRetryCount = 0
+    const MAX_NETWORK_RETRIES = 3
     let rotationAttempts = 0
     const maxRotations = await this.rotationBudget()
     for (;;) {
@@ -311,9 +312,10 @@ export class AntigravityAdapter extends LlmAdapter {
           responseHeaderTimeoutMs: this.options.responseHeaderTimeoutMs,
         })
       } catch (error) {
-        if (!retriedNetwork && !hasEmitted.value && !isAborted(signal) && isRetryableNetworkError(error)) {
-          retriedNetwork = true
-          await waitRetryBackoff(500, signal)
+        if (networkRetryCount < MAX_NETWORK_RETRIES && !hasEmitted.value && !isAborted(signal) && isRetryableNetworkError(error)) {
+          networkRetryCount += 1
+          const backoffMs = Math.min(1000 * Math.pow(2, networkRetryCount - 1), 4000)
+          await waitRetryBackoff(backoffMs, signal)
           continue
         }
         throw toLlmError(error)
@@ -333,10 +335,11 @@ export class AntigravityAdapter extends LlmAdapter {
             continue
           }
         }
-        if ((response.status === 502 || response.status === 503 || response.status === 504) && !retriedNetwork && !hasEmitted.value && !isAborted(signal)) {
+        if ((response.status === 502 || response.status === 503 || response.status === 504) && networkRetryCount < MAX_NETWORK_RETRIES && !hasEmitted.value && !isAborted(signal)) {
           await cancelResponse(response)
-          retriedNetwork = true
-          await waitRetryBackoff(500, signal)
+          networkRetryCount += 1
+          const backoffMs = Math.min(1000 * Math.pow(2, networkRetryCount - 1), 4000)
+          await waitRetryBackoff(backoffMs, signal)
           continue
         }
         if (response.status === 400 && await responseReportsContextWindowExceeded(response, {
@@ -368,9 +371,10 @@ export class AntigravityAdapter extends LlmAdapter {
             continue
           }
         }
-        if (!retriedNetwork && !hasEmitted.value && !isAborted(signal) && isRetryableNetworkError(error)) {
-          retriedNetwork = true
-          await waitRetryBackoff(500, signal)
+        if (networkRetryCount < MAX_NETWORK_RETRIES && !hasEmitted.value && !isAborted(signal) && isRetryableNetworkError(error)) {
+          networkRetryCount += 1
+          const backoffMs = Math.min(1000 * Math.pow(2, networkRetryCount - 1), 4000)
+          await waitRetryBackoff(backoffMs, signal)
           continue
         }
         throw toLlmError(error)
@@ -930,7 +934,7 @@ export function buildAntigravityGeneratePayload(
   attachments?: Pick<AttachmentStore, 'readImage'>,
   fs?: Pick<FileSystem, 'processPathFromHostPath'>,
 ): Record<string, unknown> {
-  const toolNames = new Map<string, string>()
+  const toolNames = new Map<string, ToolCallState>()
   const history = safeProjectOffloadedImages(options.messages, (ref: ImageAttachmentRef) => safeOffloadedImageText(ref, resolveAntigravityImageAccess(attachments, fs, ref)))
   const contents = (history as readonly Message[])
     .filter((message: Message) => message.role !== 'system')
@@ -951,7 +955,7 @@ async function buildAntigravityGeneratePayloadForAdapter(
   /** Downscaled byte length actually sent per attachment; requiredImageOffload applies base64Length itself. */
   const sentImageBytes = new Map<string, number>()
   const contents: Record<string, unknown>[] = []
-  const toolNames = new Map<string, string>()
+  const toolNames = new Map<string, ToolCallState>()
   const history = safeProjectOffloadedImages(options.messages, (ref: ImageAttachmentRef) => safeOffloadedImageText(ref, resolveAntigravityImageAccess(attachments, fs, ref)))
   for (const message of (history as readonly Message[])) {
     if (message.role === 'system') continue
@@ -1130,7 +1134,9 @@ function claudeToolTypeHint(value: unknown): string {
   return type
 }
 
-function mapMessage(message: Message, model: string, toolNames: Map<string, string>): Record<string, unknown> {
+function mapMessage(message: Message, model: string, toolNames: Map<string, ToolCallState>): Record<string, unknown> {
+  /** Calls of a new assistant message are the only ones its results may answer. */
+  if (message.role === 'assistant') expirePendingToolCalls(toolNames)
   const parts: Record<string, unknown>[] = []
   const replay = compatibleReplayState(message, ANTIGRAVITY_PROVIDER, model, contentKinds(message))
   const replayBlocks = replay?.blocks ?? []
@@ -1140,13 +1146,14 @@ function mapMessage(message: Message, model: string, toolNames: Map<string, stri
   let emittedToolResponse = false
   if ((message as unknown as { role?: string }).role === 'tool' && typeof (message as unknown as { toolCallId?: string }).toolCallId === 'string' && ((message as unknown as { toolCallId: string }).toolCallId.length > 0)) {
     const toolCallId = requireToolCallId((message as unknown as { toolCallId: string }).toolCallId)
-    const toolName = toolNames.get(toolCallId)
-    if (toolName !== undefined) {
+    /** A tool message with no prior call of that id is skipped, not an error. */
+    const binding = toolNames.has(toolCallId) ? consumeToolBinding(toolNames, toolCallId) : undefined
+    if (binding !== undefined) {
       emittedToolResponse = true
       parts.push({
         functionResponse: {
-          ...(isClaude ? { id: toolCallId } : {}),
-          name: toolName,
+          ...(isClaude ? { id: binding.id } : {}),
+          name: binding.name,
           response: toolResponsePayload(blocksToText(message.content), (message as unknown as { isError?: boolean }).isError),
         },
       })
@@ -1170,9 +1177,8 @@ function mapMessage(message: Message, model: string, toolNames: Map<string, stri
       parts.push({ text: block.text, thought: true, ...(blockSignature === undefined ? {} : { thoughtSignature: blockSignature }) })
     } else if (block.type === 'tool-call') {
       const callId = rememberToolName(toolNames, block.id, block.name)
-      const signature = isClaude
-        ? (sawClaudeFunctionCall ? undefined : (blockSignature ?? SKIP_THOUGHT_SIGNATURE))
-        : blockSignature
+      /** Every family needs a signature here: the endpoint rejects unsigned functionCall parts with 400 INVALID_ARGUMENT. */
+      const signature = isClaude && sawClaudeFunctionCall ? undefined : (blockSignature ?? SKIP_THOUGHT_SIGNATURE)
       sawClaudeFunctionCall ||= isClaude
       parts.push({
         functionCall: {
@@ -1183,11 +1189,13 @@ function mapMessage(message: Message, model: string, toolNames: Map<string, stri
         ...(signature === undefined ? {} : { thoughtSignature: signature }),
       })
     } else if (block.type === 'tool-result') {
-      const callId = requireToolCallId(block.toolCallId)
+      /** A role='tool' message was already answered as a whole; its block must not consume the call again. */
+      if (emittedToolResponse) continue
+      const binding = consumeToolBinding(toolNames, block.toolCallId)
       parts.push({
         functionResponse: {
-          ...(isClaude ? { id: callId } : {}),
-          name: requireToolName(toolNames, callId),
+          ...(isClaude ? { id: binding.id } : {}),
+          name: binding.name,
           response: toolResponsePayload(blocksToText(block.content), block.isError),
         },
       })
@@ -1204,7 +1212,7 @@ function mapMessage(message: Message, model: string, toolNames: Map<string, stri
 async function mapMessageWithAttachments(
   message: Message,
   model: string,
-  toolNames: Map<string, string>,
+  toolNames: Map<string, ToolCallState>,
   attachments: (Pick<AttachmentStore, 'readImage'> & {
     readImageRequest?(ref: ImageAttachmentRef, bounds: unknown, signal?: AbortSignal): Promise<{ data: Uint8Array; mediaType: string }>
   }) | undefined,
@@ -1213,6 +1221,8 @@ async function mapMessageWithAttachments(
 ): Promise<Record<string, unknown>> {
   if (!message.content.some(block => block.type === 'image')) return mapMessage(message, model, toolNames)
   if (attachments === undefined) throw new LlmError('Antigravity image input requires the Host AttachmentStore', 'UNSUPPORTED_MODALITY')
+  /** Calls of a new assistant message are the only ones its results may answer. */
+  if (message.role === 'assistant') expirePendingToolCalls(toolNames)
   const replay = compatibleReplayState(message, ANTIGRAVITY_PROVIDER, model, contentKinds(message))
   const replayBlocks = replay?.blocks ?? []
   const parts: Record<string, unknown>[] = []
@@ -1222,13 +1232,14 @@ async function mapMessageWithAttachments(
   let emittedToolResponse = false
   if ((message as unknown as { role?: string }).role === 'tool' && typeof (message as unknown as { toolCallId?: string }).toolCallId === 'string' && ((message as unknown as { toolCallId: string }).toolCallId.length > 0)) {
     const toolCallId = requireToolCallId((message as unknown as { toolCallId: string }).toolCallId)
-    const toolName = toolNames.get(toolCallId)
-    if (toolName !== undefined) {
+    /** A tool message with no prior call of that id is skipped, not an error. */
+    const binding = toolNames.has(toolCallId) ? consumeToolBinding(toolNames, toolCallId) : undefined
+    if (binding !== undefined) {
       emittedToolResponse = true
       parts.push({
         functionResponse: {
-          ...(isClaude ? { id: toolCallId } : {}),
-          name: toolName,
+          ...(isClaude ? { id: binding.id } : {}),
+          name: binding.name,
           response: toolResponsePayload(blocksToText(message.content), (message as unknown as { isError?: boolean }).isError),
         },
       })
@@ -1271,9 +1282,8 @@ async function mapMessageWithAttachments(
       parts.push({ text: block.text, thought: true, ...(blockSignature === undefined ? {} : { thoughtSignature: blockSignature }) })
     } else if (block.type === 'tool-call') {
       const callId = rememberToolName(toolNames, block.id, block.name)
-      const signature = isClaude
-        ? (sawClaudeFunctionCall ? undefined : (blockSignature ?? SKIP_THOUGHT_SIGNATURE))
-        : blockSignature
+      /** Every family needs a signature here: the endpoint rejects unsigned functionCall parts with 400 INVALID_ARGUMENT. */
+      const signature = isClaude && sawClaudeFunctionCall ? undefined : (blockSignature ?? SKIP_THOUGHT_SIGNATURE)
       sawClaudeFunctionCall ||= isClaude
       parts.push({
         functionCall: {
@@ -1284,11 +1294,13 @@ async function mapMessageWithAttachments(
         ...(signature === undefined ? {} : { thoughtSignature: signature }),
       })
     } else if (block.type === 'tool-result') {
-      const callId = requireToolCallId(block.toolCallId)
+      /** A role='tool' message was already answered as a whole; its block must not consume the call again. */
+      if (emittedToolResponse) continue
+      const binding = consumeToolBinding(toolNames, block.toolCallId)
       parts.push({
         functionResponse: {
-          ...(isClaude ? { id: callId } : {}),
-          name: requireToolName(toolNames, callId),
+          ...(isClaude ? { id: binding.id } : {}),
+          name: binding.name,
           response: toolResponsePayload(blocksToText(block.content), block.isError),
         },
       })
@@ -1297,19 +1309,64 @@ async function mapMessageWithAttachments(
   return { role: message.role === 'assistant' ? 'model' : 'user', parts }
 }
 
-function rememberToolName(toolNames: Map<string, string>, callId: unknown, name: string): string {
-  if (name.length === 0 || name.length > 256 || containsControl(name)) throw new LlmError('The tool call name is invalid', 'INVALID_ARGS')
-  const id = requireToolCallId(callId)
-  const existing = toolNames.get(id)
-  if (existing !== undefined && existing !== name) throw new LlmError('A tool call id was reused with a different name', 'INVALID_ARGS')
-  toolNames.set(id, name)
-  return id
+/** The wire identity of the latest call under one raw provider id, for the call and for its answer. */
+interface ToolCallBinding {
+  readonly id: string
+  readonly name: string
 }
 
-function requireToolName(toolNames: ReadonlyMap<string, string>, callId: unknown): string {
-  const name = toolNames.get(requireToolCallId(callId))
-  if (name === undefined) throw new LlmError('A tool result did not match a prior tool call', 'INVALID_ARGS')
-  return name
+/** Every unanswered call under one raw provider id, in call order, plus the most recent binding. */
+interface ToolCallState {
+  last: ToolCallBinding
+  pending: ToolCallBinding[]
+}
+
+function rememberToolName(toolNames: Map<string, ToolCallState>, callId: unknown, name: string): string {
+  if (name.length === 0 || name.length > 256 || containsControl(name)) throw new LlmError('The tool call name is invalid', 'INVALID_ARGS')
+  const id = requireToolCallId(callId)
+  const state = toolNames.get(id)
+  /**
+   * Provider call ids are unique per request, not across a durable history: the
+   * same id legitimately reappears under another tool name. Suffixing the later
+   * occurrence keeps every call addressable by its own answer instead of failing
+   * the whole turn, and the suffix derives only from the ordered history, so a
+   * rebuilt request reproduces the same ids byte for byte. A name that repeats
+   * after a conflict keeps its own assigned id rather than reclaiming the raw id
+   * still carried by the first call.
+   */
+  const assigned = state === undefined ? id : state.last.name === name ? state.last.id : `${id}#${name}`
+  const binding = { id: assigned, name }
+  toolNames.set(id, { last: binding, pending: [...(state?.pending ?? []), binding] })
+  return assigned
+}
+
+/**
+ * Pair one tool result with the call it answers. Only calls made by the same
+ * assistant message can share a raw id and still need in-order pairing, so the
+ * queue is expired at every new assistant message and an unanswered call from an
+ * earlier message can no longer claim a later result.
+ */
+function consumeToolBinding(toolNames: Map<string, ToolCallState>, callId: unknown): ToolCallBinding {
+  const state = toolNames.get(requireToolCallId(callId))
+  if (state === undefined) throw new LlmError('A tool result did not match a prior tool call', 'INVALID_ARGS')
+  const next = state.pending.shift()
+  return next ?? state.last
+}
+
+/**
+ * Drop calls left unanswered by any earlier assistant message before reading this one.
+ *
+ * This relies on the Host committing every result of one step in the same step
+ * (`dsh-agent-loop` awaits `executeToolCalls`, and a max-tokens step returns
+ * before dispatching anything), so a call and its answer never straddle two
+ * assistant messages. If results ever become asynchronously committed, an
+ * unanswered call could legitimately outlive its message and this expiry would
+ * have to pair by call order instead.
+ */
+function expirePendingToolCalls(toolNames: Map<string, ToolCallState>): void {
+  for (const state of toolNames.values()) {
+    if (state.pending.length > 0) state.pending = []
+  }
 }
 
 function requireToolCallId(value: unknown): string {
@@ -1617,7 +1674,7 @@ const LLM_FAILURE_CODES: Readonly<Record<PrivateFailureKind, string>> = {
   'response-limit': 'RESPONSE_LIMIT',
   'request-limit': 'REQUEST_LIMIT',
   upstream: 'UPSTREAM',
-  network: 'NETWORK',
+  network: 'TRANSPORT',
   failed: 'PROVIDER_ERROR',
 }
 
@@ -1628,7 +1685,7 @@ function canFallBackToPinnedTextSnapshot(error: unknown): boolean {
     || error.code === 'PROTOCOL_DRIFT'
     || error.code === 'RESPONSE_LIMIT'
     || error.code === 'UPSTREAM'
-    || error.code === 'NETWORK'
+    || error.code === 'TRANSPORT'
 }
 
 function toModelCatalogError(
