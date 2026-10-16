@@ -938,6 +938,245 @@ describe('Antigravity LLM adapter', () => {
     expect(contents[1]?.parts).toEqual([{ functionResponse: { name: 'lookup_weather', response: { content: 'sunny' } } }])
   })
 
+  it('keeps a reused provider call id addressable by tool name instead of failing the turn', () => {
+    const reusedCallId = 'call_332562'
+    const assistant = (name: string, argumentsText: string): Message => ({
+      id: `assistant-${name}` as never,
+      role: 'assistant',
+      source: { kind: 'model', provider: ANTIGRAVITY_PROVIDER, model: 'antigravity-gemini-3.7-flash' },
+      content: [{ type: 'tool-call', id: reusedCallId as never, name, arguments: argumentsText }],
+    } as Message)
+    const result = (name: string, text: string): Message => ({
+      id: `result-${name}` as never,
+      role: 'user',
+      source: { kind: 'tool', callId: reusedCallId as never },
+      content: [{ type: 'tool-result', toolCallId: reusedCallId as never, content: [{ type: 'text', text }] }],
+    } as Message)
+
+    const payload = buildAntigravityGeneratePayload(options({ messages: [
+      assistant('grep', '{"pattern":"a"}'),
+      result('grep', 'hit'),
+      assistant('edit', '{"file":"b"}'),
+      result('edit', 'written'),
+    ] }), credential('access'))
+    const contents = (payload.request as { contents: Array<{ parts: unknown[] }> }).contents
+
+    expect(contents[0]?.parts).toEqual([{ functionCall: { name: 'grep', args: { pattern: 'a' } } }])
+    expect(contents[1]?.parts).toEqual([{ functionResponse: { name: 'grep', response: { content: 'hit' } } }])
+    expect(contents[2]?.parts).toEqual([{ functionCall: { name: 'edit', args: { file: 'b' } } }])
+    expect(contents[3]?.parts).toEqual([{ functionResponse: { name: 'edit', response: { content: 'written' } } }])
+  })
+
+  it('suffixes a reused Claude call id deterministically so two rebuilds stay identical', () => {
+    const model = 'antigravity-claude-opus-4-6-thinking'
+    const reusedCallId = 'call_332562'
+    const assistant = (name: string, argumentsText: string): Message => ({
+      id: `assistant-${name}` as never,
+      role: 'assistant',
+      source: { kind: 'model', provider: ANTIGRAVITY_PROVIDER, model },
+      content: [{ type: 'tool-call', id: reusedCallId as never, name, arguments: argumentsText }],
+    } as Message)
+    const result = (name: string, text: string): Message => ({
+      id: `result-${name}` as never,
+      role: 'user',
+      source: { kind: 'tool', callId: reusedCallId as never },
+      content: [{ type: 'tool-result', toolCallId: reusedCallId as never, content: [{ type: 'text', text }] }],
+    } as Message)
+    const request = options({ model, messages: [
+      assistant('grep', '{"pattern":"a"}'),
+      result('grep', 'hit'),
+      assistant('edit', '{"file":"b"}'),
+      result('edit', 'written'),
+    ] })
+
+    const first = buildAntigravityGeneratePayload(request, credential('access'))
+    const second = buildAntigravityGeneratePayload(request, credential('access'))
+    expect(second).toEqual(first)
+
+    const contents = (first.request as { contents: Array<{ parts: unknown[] }> }).contents
+    expect(contents[0]?.parts).toEqual([{ functionCall: { id: reusedCallId, name: 'grep', args: { pattern: 'a' } }, thoughtSignature: 'skip_thought_signature_validator' }])
+    expect(contents[1]?.parts).toEqual([{ functionResponse: { id: reusedCallId, name: 'grep', response: { content: 'hit' } } }])
+    expect(contents[2]?.parts).toEqual([{ functionCall: { id: `${reusedCallId}#edit`, name: 'edit', args: { file: 'b' } }, thoughtSignature: 'skip_thought_signature_validator' }])
+    expect(contents[3]?.parts).toEqual([{ functionResponse: { id: `${reusedCallId}#edit`, name: 'edit', response: { content: 'written' } } }])
+  })
+
+  /** One reused provider call id walked in order: each tool call is immediately followed by its own result. */
+  const reusedIdHistory = (callId: string, model: string, names: readonly string[]): Message[] => names.flatMap((name, index) => [
+    {
+      id: `assistant-${String(index)}-${name}` as never,
+      role: 'assistant',
+      source: { kind: 'model', provider: ANTIGRAVITY_PROVIDER, model },
+      content: [{ type: 'tool-call', id: callId as never, name, arguments: `{"step":${String(index)}}` }],
+    } as Message,
+    {
+      id: `result-${String(index)}-${name}` as never,
+      role: 'user',
+      source: { kind: 'tool', callId: callId as never },
+      content: [{ type: 'tool-result', toolCallId: callId as never, content: [{ type: 'text', text: `${name}-${String(index)}` }] }],
+    } as Message,
+  ])
+
+  const reusedIdParts = (payload: Record<string, unknown>): { callIds: Array<string | undefined>; responseIds: Array<string | undefined>; responseNames: Array<string | undefined> } => {
+    /** Claude grouping merges consecutive responses into one content, so read every part of every content. */
+    const parts = (payload.request as { contents: Array<{ parts: Array<Record<string, unknown>> }> }).contents.flatMap(content => content.parts)
+    return {
+      callIds: parts.filter(part => part.functionCall !== undefined).map(part => (part.functionCall as { id?: string }).id),
+      responseIds: parts.filter(part => part.functionResponse !== undefined).map(part => (part.functionResponse as { id?: string }).id),
+      responseNames: parts.filter(part => part.functionResponse !== undefined).map(part => (part.functionResponse as { name?: string }).name),
+    }
+  }
+
+  it('reuses the assigned id when a name repeats after a conflict instead of falling back to the raw id', () => {
+    const model = 'antigravity-claude-opus-4-6-thinking'
+    const reusedCallId = 'call_332562'
+    const payload = buildAntigravityGeneratePayload(
+      options({ model, messages: reusedIdHistory(reusedCallId, model, ['grep', 'edit', 'edit']) }),
+      credential('access'),
+    )
+    const { callIds, responseIds, responseNames } = reusedIdParts(payload)
+
+    expect(callIds).toEqual([reusedCallId, `${reusedCallId}#edit`, `${reusedCallId}#edit`])
+    expect(responseIds).toEqual([reusedCallId, `${reusedCallId}#edit`, `${reusedCallId}#edit`])
+    expect(responseNames).toEqual(['grep', 'edit', 'edit'])
+  })
+
+  it('gives each conflicting name its own id when one call id alternates names', () => {
+    const model = 'antigravity-claude-opus-4-6-thinking'
+    const reusedCallId = 'call_332562'
+    const payload = buildAntigravityGeneratePayload(
+      options({ model, messages: reusedIdHistory(reusedCallId, model, ['grep', 'edit', 'grep']) }),
+      credential('access'),
+    )
+    const { callIds, responseIds, responseNames } = reusedIdParts(payload)
+
+    expect(callIds).toEqual([reusedCallId, `${reusedCallId}#edit`, `${reusedCallId}#grep`])
+    expect(responseIds).toEqual([reusedCallId, `${reusedCallId}#edit`, `${reusedCallId}#grep`])
+    expect(responseNames).toEqual(['grep', 'edit', 'grep'])
+  })
+
+  /** Both calls of one reused provider id precede their results: each result must pair with its own call. */
+  const reusedIdBatchedHistory = (callId: string, model: string, names: readonly string[]): Message[] => [
+    {
+      id: 'assistant-batch' as never,
+      role: 'assistant',
+      source: { kind: 'model', provider: ANTIGRAVITY_PROVIDER, model },
+      content: names.map((name, index) => ({ type: 'tool-call', id: callId as never, name, arguments: `{"step":${String(index)}}` })) as never,
+    } as Message,
+    ...names.map((name, index) => ({
+      id: `result-${String(index)}-${name}` as never,
+      role: 'user',
+      source: { kind: 'tool', callId: callId as never },
+      content: [{ type: 'tool-result', toolCallId: callId as never, content: [{ type: 'text', text: `${name}-${String(index)}` }] }],
+    } as Message)),
+  ]
+
+  it('pairs each result with its own call when both calls precede their results under one reused id', () => {
+    const model = 'antigravity-claude-opus-4-6-thinking'
+    const reusedCallId = 'call_332562'
+    const payload = buildAntigravityGeneratePayload(
+      options({ model, messages: reusedIdBatchedHistory(reusedCallId, model, ['grep', 'edit']) }),
+      credential('access'),
+    )
+    const { callIds, responseIds, responseNames } = reusedIdParts(payload)
+
+    expect(callIds).toEqual([reusedCallId, `${reusedCallId}#edit`])
+    expect(responseIds).toEqual([reusedCallId, `${reusedCallId}#edit`])
+    expect(responseNames).toEqual(['grep', 'edit'])
+  })
+
+  it('pairs role=tool messages with their own call under one reused id', () => {
+    const model = 'antigravity-claude-opus-4-6-thinking'
+    const reusedCallId = 'call_332562'
+    const history = reusedIdBatchedHistory(reusedCallId, model, ['grep', 'edit'])
+    const assistant = history[0] as Message
+    const responses = history.slice(1).map((message, index) => {
+      const name = index === 0 ? 'grep' : 'edit'
+      return {
+        id: `tool-${name}` as never,
+        role: 'tool',
+        toolCallId: reusedCallId,
+        source: { kind: 'tool', callId: reusedCallId as never },
+        content: [{ type: 'text', text: `${name}-${String(index)}` }],
+      } as unknown as Message
+    })
+
+    const payload = buildAntigravityGeneratePayload(
+      options({ model, messages: [assistant, ...responses] }),
+      credential('access'),
+    )
+    const { responseIds, responseNames } = reusedIdParts(payload)
+
+    expect(responseIds).toEqual([reusedCallId, `${reusedCallId}#edit`])
+    expect(responseNames).toEqual(['grep', 'edit'])
+  })
+
+  it('lets a later call of a reused id answer when an earlier call stayed unanswered', () => {
+    const model = 'antigravity-claude-opus-4-6-thinking'
+    const reusedCallId = 'call_332562'
+    const assistant = (name: string): Message => ({
+      id: `assistant-${name}` as never,
+      role: 'assistant',
+      source: { kind: 'model', provider: ANTIGRAVITY_PROVIDER, model },
+      content: [{ type: 'tool-call', id: reusedCallId as never, name, arguments: '{}' }],
+    } as Message)
+    /** The grep call was truncated by max-tokens and never produced a result. */
+    const messages = [
+      assistant('grep'),
+      assistant('edit'),
+      {
+        id: 'result-edit' as never,
+        role: 'user',
+        source: { kind: 'tool', callId: reusedCallId as never },
+        content: [{ type: 'tool-result', toolCallId: reusedCallId as never, content: [{ type: 'text', text: 'edit-written' }] }],
+      } as Message,
+    ]
+
+    const payload = buildAntigravityGeneratePayload(options({ model, messages }), credential('access'))
+    const { responseIds, responseNames } = reusedIdParts(payload)
+
+    expect(responseNames).toEqual(['edit'])
+    expect(responseIds).toEqual([`${reusedCallId}#edit`])
+  })
+
+  it('streams a history whose provider call id was reused without failing the turn', async () => {
+    const model = 'antigravity-claude-opus-4-6-thinking'
+    const reusedCallId = 'call_332562'
+    const assistant = (name: string, argumentsText: string): Message => ({
+      id: `assistant-${name}` as never,
+      role: 'assistant',
+      source: { kind: 'model', provider: ANTIGRAVITY_PROVIDER, model },
+      content: [{ type: 'tool-call', id: reusedCallId as never, name, arguments: argumentsText }],
+    } as Message)
+    const result = (name: string, text: string): Message => ({
+      id: `result-${name}` as never,
+      role: 'user',
+      source: { kind: 'tool', callId: reusedCallId as never },
+      content: [{ type: 'tool-result', toolCallId: reusedCallId as never, content: [{ type: 'text', text }] }],
+    } as Message)
+    const request = vi.fn(async () => new Response('data: {"response":{"parts":[{"text":"recovered"}],"finishReason":"STOP"}}\n\n'))
+    const adapter = new AntigravityAdapter({
+      auth: { credential: vi.fn(async () => credential('access')) },
+      transport: { request },
+    })
+
+    const chunks = await collect(adapter.stream(options({
+      model,
+      messages: [
+        assistant('grep', '{"pattern":"a"}'),
+        result('grep', 'hit'),
+        assistant('edit', '{"file":"b"}'),
+        result('edit', 'written'),
+      ],
+      tools: [
+        { name: 'grep', description: 'Search', parameters: { type: 'object' } },
+        { name: 'edit', description: 'Edit', parameters: { type: 'object' } },
+      ],
+    })))
+
+    expect(chunks).toContainEqual(expect.objectContaining({ type: 'text-delta', text: 'recovered' }))
+    expect(request).toHaveBeenCalledOnce()
+  })
+
   it('assembles fragmented provider function names in the final public tool block', async () => {
     const transport = {
       request: vi.fn(async ({ url }: PrivateTransportRequest) => url.endsWith(':fetchAvailableModels')
