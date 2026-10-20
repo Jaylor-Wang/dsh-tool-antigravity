@@ -33,10 +33,13 @@
 ### 2. 支持的模型列表 (`google-antigravity`)
 | 模型标识符 | 显示名称 | 核心模态 | 思考预算支持 |
 | :--- | :--- | :--- | :--- |
+| `antigravity-gemini-4-argon` | Gemini 4 Argon | 文本, 视觉, 工具 | Low / Medium / High |
 | `antigravity-gemini-3.8-flash` | Gemini 3.8 Flash | 文本, 视觉, 工具 | Low / Medium / High |
 | `antigravity-gemini-3.7-flash` | Gemini 3.7 Flash | 文本, 视觉, 工具 | Low / Medium / High |
 | `antigravity-gemini-3.6-flash` | Gemini 3.6 Flash | 文本, 视觉, 工具 | 默认档位 |
 | `antigravity-gemini-3.1-pro` | Gemini 3.1 Pro | 文本, 视觉, 工具 | Low / High |
+| `claude-sonnet-5-5-thinking` | Claude Sonnet 5.5 | 文本, 视觉, 工具 | Low / Medium / High |
+| `claude-opus-5-5-thinking` | Claude Opus 5.5 | 文本, 视觉, 工具 | Low / Medium / High |
 | `claude-sonnet-4-6-thinking` | Claude Sonnet 4.6 | 文本, 视觉, 工具 | 动态深度推理 |
 | `claude-opus-4-6-thinking` | Claude Opus 4.6 | 文本, 视觉, 工具 | 动态深度推理 |
 | `gpt-oss-120b-medium` | GPT-OSS 120B | 文本, 工具 | 固定档位 |
@@ -100,8 +103,20 @@ pnpm add dsh-tool-antigravity
 
 1. **凭证物理隔离**：`accessToken` 与 `refreshToken` 严格保留在宿主安全存储中，绝不泄露给前端 UI、日志或命令历史。
 2. **严格 Loopback 守卫**：账号 RPC 接口仅在明确绑定 `127.0.0.1` 时生效，其他公网/未知 bind 默认阻断（Fail-Closed）。
-3. **不可篡改线路签名**：严格维持已审计的 AGY CLI User-Agent（`antigravity/cli/1.1.24`）与归属载荷。
+3. **不可篡改线路签名**：严格维持已审计的 AGY CLI User-Agent（`antigravity/cli/1.3.0`）与归属载荷。
 4. **多媒体路径逃逸防护**：强制进行目录穿越防范与符号链接安全检测。
+
+---
+
+## 本分支新增（Gemini 4 Argon 与 Claude 5.5）
+
+本分支新增 Gemini 4 Argon、Claude Sonnet/Opus 5.5 思考档位，以及仅属于 Argon 的周额度分组：
+
+- `antigravity-gemini-4-argon`（`low` / `medium` / `high`）路由到 `gemini-4-argon-<tier>` 并带上对应的 `thinkingLevel`。
+- `antigravity-claude-sonnet-5-5-thinking` / `antigravity-claude-opus-5-5-thinking` 路由到带编号的 Claude 5.5 档位，并按档位设置思考预算。
+- 设置页额度面板把 Argon 单独列为一组，不再并入 Gemini 分组。
+
+Gemini 4 Argon 只有在 AGY CLI `>= 1.3.0` 的实时目录中才会出现，因此 `fingerprint.js` 中已审计的版本号提升为 `1.3.0`。相关路由修改位于预编译发布的 `@cortexkit/antigravity-auth-core` 中，本分支通过 `pnpm-workspace.yaml` 声明的 pnpm 补丁（`patches/@cortexkit__antigravity-auth-core@2.2.0.patch`）应用，`pnpm install` 即可复现。
 
 ---
 

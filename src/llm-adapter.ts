@@ -607,6 +607,26 @@ function cleanModelDisplayName(name: string): string {
 
 function getModelReasoningEfforts(modelId: string): { efforts: readonly { id: ReturnType<typeof ReasoningEffortId>; name: string }[]; defaultEffort: ReturnType<typeof ReasoningEffortId> } | undefined {
   const lower = modelId.toLowerCase()
+  if (lower.includes('gemini-4-argon')) {
+    return {
+      efforts: [
+        { id: ReasoningEffortId('low'), name: 'Low' },
+        { id: ReasoningEffortId('medium'), name: 'Medium' },
+        { id: ReasoningEffortId('high'), name: 'High' },
+      ],
+      defaultEffort: ReasoningEffortId('medium'),
+    }
+  }
+  if (lower.includes('claude') && lower.includes('5-5')) {
+    return {
+      efforts: [
+        { id: ReasoningEffortId('low'), name: 'Low' },
+        { id: ReasoningEffortId('medium'), name: 'Medium' },
+        { id: ReasoningEffortId('high'), name: 'High' },
+      ],
+      defaultEffort: ReasoningEffortId('medium'),
+    }
+  }
   if (lower.includes('flash') && !lower.includes('image')) {
     return {
       efforts: [
@@ -1012,6 +1032,8 @@ function buildPayloadFromContents(
 ): Record<string, unknown> {
   const wireModel = resolveWireModel(options.model, options.reasoningEffort)
   const usesCapturedGemini38ThinkingBudget = /^gemini-3\.8-flash-(?:low|medium|high)$/u.test(wireModel)
+  const usesCapturedGemini4ArgonThinkingLevel = /^gemini-4-argon-(?:low|medium|high)$/u.test(wireModel)
+  const usesCapturedClaude55ThinkingBudget = /^claude-(?:sonnet|opus)-5-5-(?:low|medium|high)$/u.test(wireModel)
   const requestContents = groupClaudeFunctionResponses(contents, options.model)
   const request: Record<string, unknown> = { contents: requestContents }
   // V3 AgentLoop stores instructions in system messages. One-shot callers may
@@ -1034,7 +1056,7 @@ function buildPayloadFromContents(
     const declarations = buildFunctionDeclarations(options.tools)
     if (declarations.length > 0) request.tools = [{ functionDeclarations: declarations }]
   }
-  const resolved = resolveModelWithTier(usesCapturedGemini38ThinkingBudget ? wireModel : options.model, { cli_first: false })
+  const resolved = resolveModelWithTier(usesCapturedGemini38ThinkingBudget || usesCapturedClaude55ThinkingBudget ? wireModel : options.model, { cli_first: false })
   const requestedEffort = normalizeReasoningEffort(options.reasoningEffort)
   const thinkingLevel = requestedEffort ?? resolved.thinkingLevel
   if (wireModel.toLowerCase().includes('claude')) {
@@ -1058,6 +1080,12 @@ function buildPayloadFromContents(
         throw new LlmError('The Gemini 3.8 captured thinking configuration could not be resolved', 'PROTOCOL_DRIFT')
       }
       transformedConfig.thinkingConfig = { includeThoughts: true, thinkingBudget: resolved.thinkingBudget }
+    }
+    if (usesCapturedGemini4ArgonThinkingLevel) {
+      const existingConfig = request.generationConfig
+      const transformedConfig = isRecord(existingConfig) ? existingConfig : {}
+      request.generationConfig = transformedConfig
+      transformedConfig.thinkingConfig = { includeThoughts: true, thinkingLevel: String(thinkingLevel ?? 'medium') }
     }
   }
   const project = credential.projectId === 'inductive-dreamer-qrkws' || !credential.projectId ? undefined : credential.projectId
@@ -1387,9 +1415,11 @@ function resolveWireModel(model: string, reasoningEffort?: GenerateOptions['reas
     return 'gemini-3-flash'
   }
   const effort = normalizeReasoningEffort(reasoningEffort)
-  const routeModel = effort !== undefined && (model === 'antigravity-gemini-3.8-flash' || model === 'gemini-3.8-flash')
-    ? `${model}-${effort}`
-    : model
+  const tierRouted = model === 'antigravity-gemini-3.8-flash' || model === 'gemini-3.8-flash'
+    || model === 'antigravity-gemini-4-argon' || model === 'gemini-4-argon'
+    || model === 'antigravity-claude-sonnet-5-5-thinking' || model === 'claude-sonnet-5-5-thinking'
+    || model === 'antigravity-claude-opus-5-5-thinking' || model === 'claude-opus-5-5-thinking'
+  const routeModel = effort !== undefined && tierRouted ? `${model}-${effort}` : model
   const resolved = resolveModelWithTier(routeModel, { cli_first: false })
   if (resolved.actualModel.startsWith('gemini-3.7-flash')) {
     return 'gemini-3-flash'

@@ -1,0 +1,309 @@
+diff --git a/dist/agy-request-metadata.js b/dist/agy-request-metadata.js
+index 53fcac3f428079eb2eec8a9f550a665577c14487..b69bd6a2e7bbaa65cc134dbf33ee22df07215c24 100644
+--- a/dist/agy-request-metadata.js
++++ b/dist/agy-request-metadata.js
+@@ -26,6 +26,15 @@ const AGY_MODEL_ENUM_BY_WIRE_MODEL = {
+     'gemini-3.8-flash-low': 'MODEL_PLACEHOLDER_M320',
+     'gemini-3.8-flash-medium': 'MODEL_PLACEHOLDER_M319',
+     'gemini-3.8-flash-high': 'MODEL_PLACEHOLDER_M318',
++    'gemini-4-argon-low': 'MODEL_PLACEHOLDER_M419',
++    'gemini-4-argon-medium': 'MODEL_PLACEHOLDER_M418',
++    'gemini-4-argon-high': 'MODEL_PLACEHOLDER_M417',
++    'claude-sonnet-5-5-low': 'MODEL_PLACEHOLDER_M403',
++    'claude-sonnet-5-5-medium': 'MODEL_PLACEHOLDER_M404',
++    'claude-sonnet-5-5-high': 'MODEL_PLACEHOLDER_M405',
++    'claude-opus-5-5-low': 'MODEL_PLACEHOLDER_M400',
++    'claude-opus-5-5-medium': 'MODEL_PLACEHOLDER_M401',
++    'claude-opus-5-5-high': 'MODEL_PLACEHOLDER_M402',
+     'gemini-3.1-pro-low': 'MODEL_PLACEHOLDER_M36',
+     'gemini-pro-agent': 'MODEL_PLACEHOLDER_M16',
+     'claude-sonnet-4-6': 'MODEL_PLACEHOLDER_M35',
+diff --git a/dist/fingerprint.js b/dist/fingerprint.js
+index 224c9ee51368622e1754f5e0a76410873753db7f..940945838e6785ceb547e7b3e822245b6d174056 100644
+--- a/dist/fingerprint.js
++++ b/dist/fingerprint.js
+@@ -1,13 +1,15 @@
+ /**
+  * Device Fingerprint Generator for Rate Limit Mitigation
+  *
+- * Uses the agy CLI 1.1.24 content-request identity captured with mitmproxy:
++ * Uses the agy CLI 1.3.0 content-request identity captured with mitmproxy:
+  * an Antigravity CLI User-Agent with explicit client, OS, architecture, and auth metadata.
++ * 1.3.0 is the first CLI identity whose live model catalog exposes Gemini 4
++ * Argon (gemini-4-argon-{low,medium,high}); older identities hide it.
+  * The stored deviceId/sessionToken fields are
+  * retained for account history, but content requests only send User-Agent.
+  */
+ import * as crypto from 'node:crypto';
+-export const AGY_CLI_VERSION = '1.1.24';
++export const AGY_CLI_VERSION = '1.3.0';
+ export const AGY_CLI_CHANGE_LIST = '974782877';
+ const ANTIGRAVITY_API_CLIENT = 'antigravity-cli';
+ /** Maximum number of fingerprint versions to keep per account */
+diff --git a/dist/model-registry.js b/dist/model-registry.js
+index 87fcbed6a98fa95a9d49fe1f9c4579d4d45ee81f..8b9395f463cdfd557334db4a3b7c33b4b88ac1be 100644
+--- a/dist/model-registry.js
++++ b/dist/model-registry.js
+@@ -38,6 +38,17 @@ const ALL_MODEL_DEFINITIONS = {
+             high: { thinkingLevel: 'high' },
+         },
+     }),
++    'antigravity-gemini-4-argon': defineModel('antigravity-gemini-4-argon', {
++        name: 'Gemini 4 Argon (Antigravity)',
++        reasoning: true,
++        limit: { context: 1048576, output: 65536 },
++        modalities: DEFAULT_MODALITIES,
++        variants: {
++            low: { thinkingLevel: 'low' },
++            medium: { thinkingLevel: 'medium' },
++            high: { thinkingLevel: 'high' },
++        },
++    }),
+     'antigravity-gemini-3.7-flash': defineModel('antigravity-gemini-3.7-flash', {
+         name: 'Gemini 3.7 Flash (Antigravity)',
+         reasoning: true,
+@@ -68,6 +79,28 @@ const ALL_MODEL_DEFINITIONS = {
+             high: { thinkingLevel: 'high' },
+         },
+     }),
++    'antigravity-claude-sonnet-5-5-thinking': defineModel('antigravity-claude-sonnet-5-5-thinking', {
++        name: 'Claude Sonnet 5.5 Thinking (Antigravity)',
++        reasoning: true,
++        limit: { context: 1000000, output: 128000 },
++        modalities: DEFAULT_MODALITIES,
++        variants: {
++            low: { disabled: true },
++            medium: { disabled: true },
++            high: { disabled: true },
++        },
++    }),
++    'antigravity-claude-opus-5-5-thinking': defineModel('antigravity-claude-opus-5-5-thinking', {
++        name: 'Claude Opus 5.5 Thinking (Antigravity)',
++        reasoning: true,
++        limit: { context: 1000000, output: 128000 },
++        modalities: DEFAULT_MODALITIES,
++        variants: {
++            low: { disabled: true },
++            medium: { disabled: true },
++            high: { disabled: true },
++        },
++    }),
+     'antigravity-claude-sonnet-4-6-thinking': defineModel('antigravity-claude-sonnet-4-6-thinking', {
+         name: 'Claude Sonnet 4.6 Thinking (Antigravity)',
+         reasoning: true,
+@@ -176,6 +209,23 @@ const RESOLVER_ALIASES = {
+     'gemini-3.8-flash-low': 'gemini-3.8-flash',
+     'gemini-3.8-flash-medium': 'gemini-3.8-flash',
+     'gemini-3.8-flash-high': 'gemini-3.8-flash',
++    'gemini-4-argon-low': 'gemini-4-argon',
++    'gemini-4-argon-medium': 'gemini-4-argon',
++    'gemini-4-argon-high': 'gemini-4-argon',
++    'claude-sonnet-5-5-thinking': 'claude-sonnet-5-5',
++    'claude-sonnet-5-5-thinking-low': 'claude-sonnet-5-5',
++    'claude-sonnet-5-5-thinking-medium': 'claude-sonnet-5-5',
++    'claude-sonnet-5-5-thinking-high': 'claude-sonnet-5-5',
++    'claude-sonnet-5-5-low': 'claude-sonnet-5-5',
++    'claude-sonnet-5-5-medium': 'claude-sonnet-5-5',
++    'claude-sonnet-5-5-high': 'claude-sonnet-5-5',
++    'claude-opus-5-5-thinking': 'claude-opus-5-5',
++    'claude-opus-5-5-thinking-low': 'claude-opus-5-5',
++    'claude-opus-5-5-thinking-medium': 'claude-opus-5-5',
++    'claude-opus-5-5-thinking-high': 'claude-opus-5-5',
++    'claude-opus-5-5-low': 'claude-opus-5-5',
++    'claude-opus-5-5-medium': 'claude-opus-5-5',
++    'claude-opus-5-5-high': 'claude-opus-5-5',
+     'gemini-claude-opus-4-6-thinking-low': 'claude-opus-4-6-thinking',
+     'gemini-claude-opus-4-6-thinking-medium': 'claude-opus-4-6-thinking',
+     'gemini-claude-opus-4-6-thinking-high': 'claude-opus-4-6-thinking',
+@@ -224,7 +274,43 @@ const GEMINI_38_FLASH_ROUTES = {
+         high: 'gemini-3.8-flash-high',
+     },
+ };
++const GEMINI_4_ARGON_ROUTES = {
++    defaultModel: 'gemini-4-argon-medium',
++    byTier: {
++        low: 'gemini-4-argon-low',
++        medium: 'gemini-4-argon-medium',
++        high: 'gemini-4-argon-high',
++    },
++};
++const CLAUDE_55_ROUTES = {
++    sonnet: {
++        defaultModel: 'claude-sonnet-5-5-medium',
++        byTier: {
++            low: 'claude-sonnet-5-5-low',
++            medium: 'claude-sonnet-5-5-medium',
++            high: 'claude-sonnet-5-5-high',
++        },
++    },
++    opus: {
++        defaultModel: 'claude-opus-5-5-medium',
++        byTier: {
++            low: 'claude-opus-5-5-low',
++            medium: 'claude-opus-5-5-medium',
++            high: 'claude-opus-5-5-high',
++        },
++    },
++};
+ const QUOTA_GROUP_BY_MODEL_ID = {
++    'claude-sonnet-5-5': 'non-gemini',
++    'claude-sonnet-5-5-low': 'non-gemini',
++    'claude-sonnet-5-5-medium': 'non-gemini',
++    'claude-sonnet-5-5-high': 'non-gemini',
++    'claude-opus-5-5': 'non-gemini',
++    'claude-opus-5-5-low': 'non-gemini',
++    'claude-opus-5-5-medium': 'non-gemini',
++    'claude-opus-5-5-high': 'non-gemini',
++    'claude-sonnet-5-5-thinking': 'non-gemini',
++    'claude-opus-5-5-thinking': 'non-gemini',
+     'claude-opus-4-6-thinking': 'non-gemini',
+     'claude-opus-4-6': 'non-gemini',
+     'claude-sonnet-4-6-thinking': 'non-gemini',
+@@ -249,16 +335,23 @@ const QUOTA_GROUP_BY_MODEL_ID = {
+     'gemini-3.8-flash-medium': 'gemini',
+     'gemini-3.8-flash-high': 'gemini',
+     'gemini-3.8-flash-tiered': 'gemini',
++    'gemini-4-argon-low': 'gemini',
++    'gemini-4-argon-medium': 'gemini',
++    'gemini-4-argon-high': 'gemini',
++    'gemini-4-argon-tiered': 'gemini',
+     'gemini-3.1-flash-image': 'gemini',
+     'gpt-oss-120b': 'non-gemini',
+     'gpt-oss-120b-medium': 'non-gemini',
+ };
+ const ANTIGRAVITY_OPENCODE_MODEL_IDS = [
++    'antigravity-gemini-4-argon',
+     'antigravity-gemini-3.8-flash',
+     'antigravity-gemini-3.7-flash',
+     'antigravity-gemini-3.6-flash',
+     'antigravity-gemini-3.5-flash',
+     'antigravity-gemini-3.1-pro',
++    'antigravity-claude-sonnet-5-5-thinking',
++    'antigravity-claude-opus-5-5-thinking',
+     'antigravity-claude-sonnet-4-6-thinking',
+     'antigravity-claude-opus-4-6-thinking',
+     'antigravity-gemini-3.1-flash-image',
+@@ -301,6 +394,16 @@ export function getGemini37FlashAntigravityModel(tier) {
+ export function getGemini38FlashAntigravityModel(tier) {
+     return getTieredAntigravityModel(GEMINI_38_FLASH_ROUTES, tier);
+ }
++export function getGemini4ArgonAntigravityModel(tier) {
++    return getTieredAntigravityModel(GEMINI_4_ARGON_ROUTES, tier);
++}
++export function getClaude55AntigravityModel(family, tier) {
++    const routes = CLAUDE_55_ROUTES[family];
++    if (!routes) {
++        return undefined;
++    }
++    return getTieredAntigravityModel(routes, tier);
++}
+ export function getQuotaGroupForModel(modelId) {
+     const normalized = modelId.toLowerCase();
+     return (QUOTA_GROUP_BY_MODEL_ID[normalized] ??
+diff --git a/dist/transform/claude.js b/dist/transform/claude.js
+index 723966e4cc7a8ca3f9dbffa58c0176306da28c72..976ad8c5b9c8fac76ac1b523f4ccec2c3739f39f 100644
+--- a/dist/transform/claude.js
++++ b/dist/transform/claude.js
+@@ -39,7 +39,9 @@ export function isClaudeModel(model) {
+  */
+ export function isClaudeThinkingModel(model) {
+     const lower = model.toLowerCase();
+-    return lower.includes('claude') && lower.includes('thinking');
++    // Claude 5.5 wire ids encode the tier instead of the word "thinking"
++    // (claude-sonnet-5-5-medium), so they are thinking models by construction.
++    return lower.includes('claude') && (lower.includes('thinking') || /-5-5(?:-|$)/.test(lower));
+ }
+ /**
+  * Configure Claude tool calling to use VALIDATED mode.
+diff --git a/dist/transform/gemini.js b/dist/transform/gemini.js
+index 36462bf02a7811819c3806054070e43c8b611404..be4760b1513854ca3fd6b355438ba1a30855ac5b 100644
+--- a/dist/transform/gemini.js
++++ b/dist/transform/gemini.js
+@@ -156,10 +156,14 @@ export function isGeminiModel(model) {
+     return lower.includes('gemini') && !lower.includes('claude');
+ }
+ /**
+- * Check if a model is Gemini 3 (uses thinkingLevel string).
++ * Check if a model uses the thinkingLevel string form.
++ *
++ * Gemini 3 and Gemini 4 (e.g. gemini-4-argon-*) both take `thinkingLevel`
++ * instead of the legacy numeric `thinkingBudget`.
+  */
+ export function isGemini3Model(model) {
+-    return model.toLowerCase().includes('gemini-3');
++    const lower = model.toLowerCase();
++    return lower.includes('gemini-3') || lower.includes('gemini-4');
+ }
+ /**
+  * Check if a model is Gemini 2.5 (uses numeric thinkingBudget).
+diff --git a/dist/transform/model-resolver.js b/dist/transform/model-resolver.js
+index 205353bce89ec8304c144de81bf74d23438a8cf8..d116d56ed7cc7eccb934791ea7db253e81d70c8f 100644
+--- a/dist/transform/model-resolver.js
++++ b/dist/transform/model-resolver.js
+@@ -4,7 +4,7 @@
+  * Resolves model names with tier suffixes (e.g., gemini-3-pro-high, claude-opus-4-6-thinking-low)
+  * to their actual API model names and corresponding thinking configurations.
+  */
+-import { getGemini35FlashAntigravityModel, getGemini35FlashGeminiCliFallbackModel, getGemini36FlashAntigravityModel, getGemini37FlashAntigravityModel, getGemini38FlashAntigravityModel, getResolverAliasMap, } from "../model-registry.js";
++import { getClaude55AntigravityModel, getGemini35FlashAntigravityModel, getGemini35FlashGeminiCliFallbackModel, getGemini36FlashAntigravityModel, getGemini37FlashAntigravityModel, getGemini38FlashAntigravityModel, getGemini4ArgonAntigravityModel, getResolverAliasMap, } from "../model-registry.js";
+ /**
+  * Thinking tier budgets by model family.
+  * Claude and Gemini 2.5 Pro use numeric budgets.
+@@ -54,8 +54,10 @@ const IMAGE_GENERATION_MODELS = /image|imagen/i;
+ function supportsThinkingTiers(model) {
+     const lower = model.toLowerCase();
+     return (lower.includes('gemini-3') ||
++        lower.includes('gemini-4') ||
+         lower.includes('gemini-2.5') ||
+-        (lower.includes('claude') && lower.includes('thinking')));
++        (lower.includes('claude') && lower.includes('thinking')) ||
++        /^claude-(sonnet|opus)-5-5/i.test(lower));
+ }
+ /**
+  * Extracts thinking tier from model name suffix.
+@@ -91,6 +93,7 @@ function isThinkingCapableModel(model) {
+     const lower = model.toLowerCase();
+     return (lower.includes('thinking') ||
+         lower.includes('gemini-3') ||
++        lower.includes('gemini-4') ||
+         lower.includes('gemini-2.5'));
+ }
+ function isGemini3ProModel(model) {
+@@ -170,6 +173,8 @@ export function resolveModelWithTier(requestedModel, options = {}) {
+     const isGemini36Flash = /^gemini-3\.6-flash/i.test(baseName);
+     const isGemini37Flash = /^gemini-3\.7-flash/i.test(baseName);
+     const isGemini38Flash = /^gemini-3\.8-flash/i.test(baseName);
++    const isGemini4Argon = /^gemini-4-argon/i.test(baseName);
++    const claude55Family = /^(?:gemini-)?claude-(sonnet|opus)-5-5(?:-thinking)?$/i.exec(baseName);
+     const isGptOss120b = /^gpt-oss-120b(?:-medium)?$/i.test(baseName);
+     if (isGemini31Pro && quotaPreference === 'antigravity') {
+         return {
+@@ -221,6 +226,28 @@ export function resolveModelWithTier(requestedModel, options = {}) {
+             explicitQuota,
+         };
+     }
++    if (isGemini4Argon && quotaPreference === 'antigravity') {
++        return {
++            actualModel: getGemini4ArgonAntigravityModel(tier ?? 'medium'),
++            thinkingLevel: tier ?? 'medium',
++            tier: tier ?? 'medium',
++            isThinkingModel: true,
++            quotaPreference,
++            explicitQuota,
++        };
++    }
++    if (claude55Family && quotaPreference === 'antigravity') {
++        return {
++            actualModel: getClaude55AntigravityModel(claude55Family[1].toLowerCase(), tier ?? 'medium'),
++            // Claude 5.5 takes a numeric thinking budget, and the family supports
++            // low / medium / high (a "max" tier is documented but not served).
++            thinkingBudget: THINKING_TIER_BUDGETS.claude[tier ?? 'medium'],
++            tier: tier ?? 'medium',
++            isThinkingModel: true,
++            quotaPreference,
++            explicitQuota,
++        };
++    }
+     if (isGptOss120b && quotaPreference === 'antigravity') {
+         return {
+             actualModel: 'gpt-oss-120b-medium',

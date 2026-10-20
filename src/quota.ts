@@ -18,6 +18,13 @@ import { classifyPrivateFailure, type PrivateFailureKind } from './private-failu
 export const ANTIGRAVITY_QUOTA_ENDPOINT = `${ANTIGRAVITY_WIRE_ORIGIN}/v1internal:retrieveUserQuotaSummary` as const
 export const QUOTA_REFRESH_MIN_INTERVAL_MS = 30_000
 
+/** Display order for quota groups; Argon carries its own weekly allowance. */
+const QUOTA_GROUP_ORDER: Readonly<Record<QuotaGroupView['group'], number>> = {
+  gemini: 0,
+  'non-gemini': 1,
+  argon: 2,
+}
+
 export type QuotaState = 'available' | 'unauthenticated' | 'forbidden' | 'rate-limited' | 'offline' | 'timeout' | 'protocol-drift'
 export type QuotaWindowKind = '5h' | 'weekly'
 
@@ -28,7 +35,7 @@ export interface QuotaWindowView {
 }
 
 export interface QuotaGroupView {
-  readonly group: 'gemini' | 'non-gemini'
+  readonly group: 'gemini' | 'non-gemini' | 'argon'
   readonly modelCount: number
   readonly windows: readonly QuotaWindowView[]
 }
@@ -112,7 +119,7 @@ export function normalizeQuotaResponse(value: unknown, now = Date.now()): QuotaS
     }
     throw new QuotaNormalizationError('The quota response did not contain recognized windows')
   }
-  return { state: 'available', checkedAt: new Date(now).toISOString(), groups: groups.sort((left, right) => left.group.localeCompare(right.group)) }
+  return { state: 'available', checkedAt: new Date(now).toISOString(), groups: groups.sort((left, right) => QUOTA_GROUP_ORDER[left.group] - QUOTA_GROUP_ORDER[right.group] || left.group.localeCompare(right.group)) }
 }
 
 export class QuotaNormalizationError extends Error {
@@ -243,7 +250,7 @@ function identifyWindow(value: Record<string, unknown>): QuotaWindowKind | undef
   return undefined
 }
 
-function identifyGroup(candidate: Record<string, unknown>, bucket?: Record<string, unknown>): 'gemini' | 'non-gemini' | undefined {
+function identifyGroup(candidate: Record<string, unknown>, bucket?: Record<string, unknown>): 'gemini' | 'non-gemini' | 'argon' | undefined {
   const raw = [
     candidate.displayName,
     candidate.group,
@@ -257,6 +264,7 @@ function identifyGroup(candidate: Record<string, unknown>, bucket?: Record<strin
     bucket?.bucket_id,
     bucket?.displayName,
   ].filter(Boolean).map(String).join(' ').toLowerCase()
+  if (raw.includes('argon')) return 'argon'
   if (raw.includes('3p') || raw.includes('non') || raw.includes('claude') || raw.includes('gpt') || raw.includes('openai') || raw.includes('anthropic') || raw.includes('third-party') || raw.includes('external')) return 'non-gemini'
   if (raw.includes('gemini') || raw.includes('google') || raw.includes('chat') || raw.includes('code') || raw.includes('default') || raw.length === 0) return 'gemini'
   return 'gemini'

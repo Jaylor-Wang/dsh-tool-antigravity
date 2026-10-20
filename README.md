@@ -33,10 +33,13 @@ Provides private Google OAuth 2.0 PKCE authentication, multi-model LLM routing (
 ### 2. Supported Models (`google-antigravity`)
 | Model Identifier | Display Name | Capabilities | Thinking Budget |
 | :--- | :--- | :--- | :--- |
+| `antigravity-gemini-4-argon` | Gemini 4 Argon | Text, Vision, Tools | Low / Medium / High |
 | `antigravity-gemini-3.8-flash` | Gemini 3.8 Flash | Text, Vision, Tools | Low / Medium / High |
 | `antigravity-gemini-3.7-flash` | Gemini 3.7 Flash | Text, Vision, Tools | Low / Medium / High |
 | `antigravity-gemini-3.6-flash` | Gemini 3.6 Flash | Text, Vision, Tools | Default |
 | `antigravity-gemini-3.1-pro` | Gemini 3.1 Pro | Text, Vision, Tools | Low / High |
+| `claude-sonnet-5-5-thinking` | Claude Sonnet 5.5 | Text, Vision, Tools | Low / Medium / High |
+| `claude-opus-5-5-thinking` | Claude Opus 5.5 | Text, Vision, Tools | Low / Medium / High |
 | `claude-sonnet-4-6-thinking` | Claude Sonnet 4.6 | Text, Vision, Tools | Dynamic Reasoning |
 | `claude-opus-4-6-thinking` | Claude Opus 4.6 | Text, Vision, Tools | Dynamic Reasoning |
 | `gpt-oss-120b-medium` | GPT-OSS 120B | Text, Tools | Fixed Effort |
@@ -100,8 +103,20 @@ Once loaded in the DSH Web client:
 
 1. **Credential Isolation**: Access and refresh tokens are strictly held in host-side secure stores and are never forwarded to the frontend UI, logs, or command done events.
 2. **Strict Loopback Guard**: Account RPC endpoints fail-closed (`loopback-required`) unless the web service is explicitly bound to `127.0.0.1`.
-3. **Immutable Wire Identity**: Emits verified AGY CLI headers (`antigravity/cli/1.1.24`) and attribution metadata.
+3. **Immutable Wire Identity**: Emits verified AGY CLI headers (`antigravity/cli/1.3.0`) and attribution metadata.
 4. **Media Path Containment**: All file references are verified against directory traversal and symlink escapes.
+
+---
+
+## Fork Changes (Gemini 4 Argon & Claude 5.5)
+
+This fork adds Gemini 4 Argon, the Claude Sonnet/Opus 5.5 thinking tiers, and the Argon-only weekly quota group:
+
+- `antigravity-gemini-4-argon` (`low` / `medium` / `high`) routes to `gemini-4-argon-<tier>` with a matching `thinkingLevel`.
+- `antigravity-claude-sonnet-5-5-thinking` and `antigravity-claude-opus-5-5-thinking` route to the numbered Claude 5.5 tiers with a tiered thinking budget.
+- The settings quota card shows the Argon allowance as its own group instead of folding it into the Gemini groups.
+
+Gemini 4 Argon is only advertised by the live catalog for AGY CLI `>= 1.3.0`, so the audited identity in `fingerprint.js` is bumped to `1.3.0`. The routing changes live in `@cortexkit/antigravity-auth-core`, which ships prebuilt: this fork applies them through a pnpm patch declared in `pnpm-workspace.yaml` (`patches/@cortexkit__antigravity-auth-core@2.2.0.patch`), so a plain `pnpm install` reproduces the fork.
 
 ---
 

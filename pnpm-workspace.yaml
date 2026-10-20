@@ -1,2 +1,4 @@
 allowBuilds:
   esbuild: true
+patchedDependencies:
+  '@cortexkit/antigravity-auth-core@2.2.0': patches/@cortexkit__antigravity-auth-core@2.2.0.patch

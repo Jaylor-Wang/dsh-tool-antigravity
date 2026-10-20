@@ -4,13 +4,16 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@cortexkit/antigravity-auth-core@2.2.0': 30d5855aab9337fa322885672e076a52ff2924e7d37702337c6374d467a46cc4
+
 importers:
 
   .:
     dependencies:
       '@cortexkit/antigravity-auth-core':
         specifier: 2.2.0
-        version: 2.2.0
+        version: 2.2.0(patch_hash=30d5855aab9337fa322885672e076a52ff2924e7d37702337c6374d467a46cc4)
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: 4.0.2
@@ -1587,7 +1590,7 @@ snapshots:
     dependencies:
       css-tree: 3.2.1
 
-  '@cortexkit/antigravity-auth-core@2.2.0':
+  '@cortexkit/antigravity-auth-core@2.2.0(patch_hash=30d5855aab9337fa322885672e076a52ff2924e7d37702337c6374d467a46cc4)':
     dependencies:
       xdg-basedir: 5.1.0
       zod: 4.4.3
