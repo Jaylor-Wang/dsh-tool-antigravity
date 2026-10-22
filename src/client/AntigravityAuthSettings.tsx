@@ -377,22 +377,13 @@ export function AntigravityAuthSettings({ rpc, t, subscribe, imageScope }: Antig
               <p className="agy-card-intro">{t('proxyCardIntro')}</p>
             </div>
           </div>
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '4px' }}>
+          <div className="agy-proxy-row">
             <input
               type="text"
+              className="agy-input"
               placeholder={t('proxyPlaceholder')}
               value={proxyInput}
               onChange={e => setProxyInput(e.target.value)}
-              style={{
-                flex: 1,
-                background: 'rgba(255, 255, 255, 0.06)',
-                border: '1px solid rgba(255, 255, 255, 0.16)',
-                borderRadius: '6px',
-                color: '#ffffff',
-                padding: '6px 10px',
-                fontSize: '13px',
-                outline: 'none',
-              }}
             />
             <button
               className="agy-btn agy-btn-outline"
@@ -406,7 +397,12 @@ export function AntigravityAuthSettings({ rpc, t, subscribe, imageScope }: Antig
           {proxyMessage ? (
             <p
               className="agy-card-subtext"
-              style={{ color: proxyMessage.startsWith(t('saveProxyFailed')) ? '#ef4444' : '#10b981', margin: '2px 0 0' }}
+              style={{
+                color: proxyMessage.startsWith(t('saveProxyFailed'))
+                  ? 'var(--dsw-alias-state-error-primary, #ef4444)'
+                  : 'var(--dsw-alias-state-success-primary, #10b981)',
+                margin: '2px 0 0',
+              }}
             >
               {proxyMessage}
             </p>
