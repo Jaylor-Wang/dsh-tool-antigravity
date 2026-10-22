@@ -14,12 +14,11 @@ Provides private Google OAuth 2.0 PKCE authentication, multi-model LLM routing (
 
 ---
 
-## Highlights in v0.4.1 (Tool-Call ID Recovery, Network Resiliency & Thought Signature Hardening)
+## Highlights in v0.4.5 (Light Theme UI Contrast Hardening & Switch Alignment)
 
-- **Provider Tool-Call ID Reuse Recovery**: Eliminates fatal `INVALID_ARGS` session lockouts in long turns by tracking provider tool-call states, deterministically suffixing conflicting IDs (`${id}#${name}`), FIFO result pairing, and assistant-turn unfulfilled call expiry.
-- **Resilient Network Retry & Contract Alignment**: Retries transient network interruptions and 502/503/504 status codes up to 3 times with exponential backoff (1s / 2s / 4s) before byte emission, mapping transport errors to the standard `TRANSPORT` code adhering to DSH Host retry contract.
-- **Universal Thought Signature Enforcement**: Resolves private endpoint 400 `INVALID_ARGUMENT` rejections by ensuring all Gemini/non-Claude and initial Claude `functionCall` parts carry valid thought signatures or the `SKIP_THOUGHT_SIGNATURE` sentinel.
-- **Retains v0.4.0 capabilities**: Core tools prioritization (up to 384 tools), schema enum sanitization, `response.error` error semantics, and multi-agent image offloading.
+- **Light Theme UI Contrast Hardening**: Resolves washed-out invisible controls in DSH light mode by binding the proxy input to `.agy-input` with `--dsw-alias-bg-module-platform`, `--dsw-alias-border-l3`, and `--dsw-alias-label-primary`, eliminating hardcoded white-on-white text and transparent borders.
+- **Switch Slider Contrast Alignment**: Replaces nonexistent `--dsw-alias-bg-layer-4` tokens with DSH standard switch tokens (`--dsw-alias-border-l4`, `--dsw-alias-border-l3`, `--dsw-alias-switch-thumb`, and `--dsw-alias-brand-primary`), rendering crisp, high-contrast toggle tracks and knobs across both light and dark themes.
+- **Retains v0.4.1 capabilities**: Provider tool-call ID recovery, resilient network retry (exponential backoff up to 3 times), and universal thought signature enforcement.
 ## Features
 
 ### 1. High-Performance Core Architecture

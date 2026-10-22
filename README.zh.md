@@ -14,12 +14,11 @@
 
 ---
 
-## v0.4.1 版本重要更新 (工具调用 ID 冲突恢复、网络韧性重试与签名加固)
+## v0.4.5 版本重要更新 (浅色主题高反差视觉加固与开关控件对齐)
 
-- **Provider 工具调用 ID 重用自愈**：通过建立 `ToolCallState` 状态机跟踪调用，对跨轮次重用的 Provider 工具调用 ID 实施确定性后缀命名（`${id}#${name}`），配合 FIFO 结果配对与助理轮次未完成调用过期回收，彻底杜绝多轮长会话中 `INVALID_ARGS` 导致的永久卡死。
-- **瞬态网络重试扩容与错误契约对齐**：针对 pre-delta 阶段的网络抖动及 502/503/504 错误，升级为最多 3 次指数退避重试（1s / 2s / 4s）；并将网络异常代码由 `NETWORK` 统一修正为符合 DSH Host 重试规范的 `TRANSPORT`。
-- **全系模型思考签名机制加固**：针对 Gemini / 非 Claude 模型在缺失签名时会被 Google 云端 400 `INVALID_ARGUMENT` 拒绝的问题，为所有未签名的 `functionCall` 补全 `SKIP_THOUGHT_SIGNATURE` 官方哨兵值，彻底解决 400 协议漂移报错。
-- **完整保留 v0.4.0 核心能力**：工具 Schema 清洗过滤空值 enum、核心工具置顶扩容至 384、`response.error` 契约与多智能体 12MB 图片智能卸载协商。
+- **浅色主题输入控件高反差适配**：彻底重构代理输入框样式，迁移至 `.agy-input` 类并接入 `--dsw-alias-bg-module-platform`、`--dsw-alias-border-l3` 与 `--dsw-alias-label-primary`，解决浅色模式下白底白字、输入内容与外边框不可见的视觉隐形问题。
+- **开关控件（Switch）轨道与滑块主题对齐**：移除 DSH 中不存在的 `--dsw-alias-bg-layer-4`，对齐 DSH 原生开关设计规范，接入 `--dsw-alias-border-l4`、`--dsw-alias-border-l3`、`--dsw-alias-switch-thumb` 与 `--dsw-alias-brand-primary`，在深浅主题下均保持轮廓清晰、阴影立体的高反差视觉体验。
+- **完整保留 v0.4.1 核心能力**：跨轮次 Provider 工具调用 ID 冲突自愈、瞬态网络 3 次指数退避重试（对齐 `TRANSPORT` 契约）与全系非 Claude 模型思维链签名加固。
 ## 核心特性与架构设计
 
 ### 1. 高性能底层架构
