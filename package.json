@@ -1,6 +1,6 @@
 {
   "name": "dsh-tool-antigravity",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "description": "High-performance, streamlined Antigravity OAuth LLM routing and Nano Banana 2 image generation capability bundle for DeepSeek Harness",
   "type": "module",
   "engines": {
@@ -120,25 +120,6 @@
     "@cortexkit/antigravity-auth-core": "2.2.0"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-agent": "*",
-    "@deepseek-ai/dsh-api-remotes": "*",
-    "@deepseek-ai/dsh-attachment": "*",
-    "@deepseek-ai/dsh-client-connection": "*",
-    "@deepseek-ai/dsh-client-locale": "*",
-    "@deepseek-ai/dsh-client-ui-primitives": "*",
-    "@deepseek-ai/dsh-client-ui-renderer": "*",
-    "@deepseek-ai/dsh-client-ui-settings": "*",
-    "@deepseek-ai/dsh-client-ui-slots": "*",
-    "@deepseek-ai/dsh-commands": "*",
-    "@deepseek-ai/dsh-fs": "*",
-    "@deepseek-ai/dsh-host-webserver": "*",
-    "@deepseek-ai/dsh-invariants": "*",
-    "@deepseek-ai/dsh-llm": "*",
-    "@deepseek-ai/dsh-session": "*",
-    "@deepseek-ai/dsh-settings": "*",
-    "@deepseek-ai/dsh-tools": "*",
-    "@deepseek-ai/schemastery": "^3.18.2",
     "react": "^18.2.0"
   },
   "devDependencies": {
