@@ -160,7 +160,11 @@ function createPetGroupPage(
     })
   }
 
-  return { tag: 'div', children }
+  return {
+    tag: 'div',
+    style: { minWidth: '13em' },
+    children,
+  }
 }
 
 /**
