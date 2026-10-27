@@ -133,27 +133,107 @@ export function buildFunctionDeclarations(tools: readonly ToolSchema[] | undefin
   }))
 }
 
+const ALLOWED_SCHEMA_TYPES = new Set(['object', 'array', 'string', 'number', 'integer', 'boolean', 'null'])
+
+function isNullBranch(branch: unknown): boolean {
+  if (!isRecord(branch)) return false
+  const t = typeof branch.type === 'string' ? branch.type.toLowerCase() : undefined
+  return t === 'null' || (t === undefined && branch.const === null)
+}
+
 function sanitizeSchema(value: unknown, depth = 0): Record<string, unknown> {
   if (depth > 8 || !isRecord(value)) return { type: 'object', properties: {} }
-  const type = typeof value.type === 'string' && ['object', 'array', 'string', 'number', 'integer', 'boolean', 'null'].includes(value.type)
-    ? value.type
-    : 'object'
-  const output: Record<string, unknown> = { type }
-  if (typeof value.description === 'string') output.description = boundedText(value.description, 1024)
-  if (Array.isArray(value.required)) output.required = value.required.filter(item => typeof item === 'string').slice(0, 128)
-  if (Array.isArray(value.enum)) {
-    const filtered = value.enum.slice(0, 128).filter(item => ['string', 'number', 'boolean', 'null'].includes(typeof item) && item !== '')
-    if (filtered.length > 0) output.enum = filtered
+  let source: Record<string, unknown> = value
+  if (Array.isArray(source.allOf) && source.allOf.length > 0) {
+    const mergedProps: Record<string, unknown> = isRecord(source.properties) ? { ...source.properties } : {}
+    const mergedReq = new Set<string>(Array.isArray(source.required) ? source.required.filter((r): r is string => typeof r === 'string') : [])
+    for (const branch of source.allOf.slice(0, 8)) {
+      if (!isRecord(branch)) continue
+      if (isRecord(branch.properties)) Object.assign(mergedProps, branch.properties)
+      if (Array.isArray(branch.required)) {
+        for (const req of branch.required) if (typeof req === 'string') mergedReq.add(req)
+      }
+    }
+    source = { ...source, type: 'object', properties: mergedProps, ...(mergedReq.size > 0 ? { required: [...mergedReq] } : {}) }
   }
-  if (type === 'object' && isRecord(value.properties)) {
+  const rawUnion = Array.isArray(source.anyOf) ? source.anyOf : Array.isArray(source.oneOf) ? source.oneOf : undefined
+  if (rawUnion !== undefined && rawUnion.length > 0) {
+    const nonNullBranches = rawUnion.filter(branch => !isNullBranch(branch))
+    const hadNullBranch = nonNullBranches.length < rawUnion.length
+    if (nonNullBranches.length === 1 && isRecord(nonNullBranches[0])) {
+      const collapsed = sanitizeSchema({
+        ...(typeof source.description === 'string' ? { description: source.description } : {}),
+        ...nonNullBranches[0],
+      }, depth + 1)
+      if (hadNullBranch) collapsed.nullable = true
+      return collapsed
+    }
+    const branches = (nonNullBranches.length > 0 ? nonNullBranches : rawUnion)
+      .slice(0, 8)
+      .map(item => sanitizeSchema(item, depth + 1))
+    const output: Record<string, unknown> = { anyOf: branches }
+    if (typeof source.description === 'string') output.description = boundedText(source.description, 1024)
+    if (hadNullBranch || source.nullable === true) output.nullable = true
+    return output
+  }
+  let explicitType: string | undefined
+  let nullable = source.nullable === true
+  if (typeof source.type === 'string' && ALLOWED_SCHEMA_TYPES.has(source.type.toLowerCase())) {
+    explicitType = source.type.toLowerCase()
+  } else if (Array.isArray(source.type)) {
+    const validTypes = [...new Set(
+      source.type
+        .filter((item): item is string => typeof item === 'string')
+        .map(item => item.toLowerCase())
+        .filter(item => ALLOWED_SCHEMA_TYPES.has(item)),
+    )]
+    const nonNull = validTypes.filter(item => item !== 'null')
+    if (validTypes.includes('null') && nonNull.length > 0) nullable = true
+    explicitType = nonNull[0] ?? validTypes[0]
+  }
+  let enumValues: string[] | undefined
+  const hints: string[] = []
+  if (typeof source.const === 'string' && source.const.length > 0 && !hasControl(source.const)) {
+    enumValues = [source.const.slice(0, 256)]
+    explicitType ??= 'string'
+  } else if (typeof source.const === 'number' || typeof source.const === 'boolean') {
+    hints.push(`Must be ${String(source.const)}`)
+    explicitType ??= typeof source.const
+  } else if (Array.isArray(source.enum)) {
+    const rawEnum = source.enum.slice(0, 128).filter(item => ['string', 'number', 'boolean'].includes(typeof item) && item !== '')
+    if (rawEnum.length > 0) {
+      if (rawEnum.every((item): item is string => typeof item === 'string' && !hasControl(item))) {
+        enumValues = rawEnum.map(item => item.slice(0, 256))
+        explicitType ??= 'string'
+      } else {
+        hints.push(`Allowed values: ${rawEnum.map(item => JSON.stringify(item)).join(', ')}`)
+      }
+    }
+  }
+  const type = explicitType ?? (source.items !== undefined ? 'array' : 'object')
+  const output: Record<string, unknown> = { type }
+  const baseDesc = typeof source.description === 'string' ? boundedText(source.description, 1024) : ''
+  const fullDesc = hints.length > 0 ? (baseDesc ? `${baseDesc} (${hints.join('; ')})` : hints.join('; ')) : baseDesc
+  if (fullDesc.length > 0) output.description = boundedText(fullDesc, 1024)
+  if (nullable && type !== 'null') output.nullable = true
+  if (enumValues !== undefined && enumValues.length > 0) output.enum = enumValues
+  if (type === 'object') {
     const properties: Record<string, unknown> = {}
-    for (const [key, item] of Object.entries(value.properties).slice(0, 128)) {
-      if (!hasControl(key) && key.length > 0) properties[key.slice(0, 128)] = sanitizeSchema(item, depth + 1)
+    if (isRecord(source.properties)) {
+      for (const [key, item] of Object.entries(source.properties).slice(0, 128)) {
+        if (!hasControl(key) && key.length > 0) properties[key.slice(0, 128)] = sanitizeSchema(item, depth + 1)
+      }
     }
     output.properties = properties
+    if (Array.isArray(source.required)) {
+      const validRequired = source.required
+        .filter((item): item is string => typeof item === 'string' && Object.prototype.hasOwnProperty.call(properties, item))
+        .slice(0, 128)
+      if (validRequired.length > 0) output.required = validRequired
+    }
+  } else if (type === 'array') {
+    output.items = source.items !== undefined ? sanitizeSchema(source.items, depth + 1) : { type: 'string' }
   }
-  if (type === 'array') output.items = sanitizeSchema(value.items, depth + 1)
-  if (Array.isArray(value.oneOf)) output.oneOf = value.oneOf.slice(0, 8).map(item => sanitizeSchema(item, depth + 1))
   return output
 }
 

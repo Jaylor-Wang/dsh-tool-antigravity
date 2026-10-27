@@ -14,7 +14,7 @@ const credential = (token: string): HostCredential => ({
 })
 
 const liveCatalog = () => new Response(JSON.stringify({
-  models: { 'gemini-3.7-flash-medium': { displayName: 'Gemini live' } },
+  models: { 'gemini-3.8-flash-medium': { displayName: 'Gemini live' } },
 }))
 
 const message = (text: string): Message => ({
@@ -26,7 +26,7 @@ const message = (text: string): Message => ({
 
 const options = (overrides: Partial<GenerateOptions> = {}): GenerateOptions => ({
   provider: ANTIGRAVITY_PROVIDER,
-  model: 'antigravity-gemini-3.7-flash',
+  model: 'antigravity-gemini-3.8-flash',
   messages: [message('hello')],
   ...overrides,
 })
@@ -102,11 +102,11 @@ describe('Antigravity LLM adapter', () => {
 
   it.each([
     {
-      family: 'Gemini', model: 'antigravity-gemini-3.7-flash', wireModel: 'gemini-3-flash', errorCode: 'SAFETY',
+      family: 'Gemini', model: 'antigravity-gemini-3.8-flash', wireModel: 'gemini-3.8-flash-medium', errorCode: 'SAFETY',
       event: '{"response":{"parts":[{"text":"gemini-reason","thought":true},{"text":"gemini-answer"},{"functionCall":{"id":"gemini-call","name":"gemini_lookup","args":{"q":"g"}}}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":3},"finishReason":"STOP"}}',
     },
     {
-      family: 'Claude', model: 'antigravity-claude-sonnet-4-6-thinking', wireModel: 'claude-sonnet-4-6', errorCode: 'RESOURCE_EXHAUSTED',
+      family: 'Claude', model: 'antigravity-claude-sonnet-5-5', wireModel: 'claude-sonnet-5-5-low', errorCode: 'RESOURCE_EXHAUSTED',
       event: '{"response":{"parts":[{"text":"claude-reason","thinking":true},{"text":"claude-answer"},{"function_call":{"id":"claude-call","name":"claude_lookup","args":{"q":"c"}}}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":3},"finishReason":"STOP"}}',
     },
     {
@@ -151,7 +151,7 @@ describe('Antigravity LLM adapter', () => {
           toolConfig?: { functionCallingConfig?: { mode?: string } }
         }
       }
-      expect(payload.model).toBe('claude-opus-4-6-thinking')
+      expect(payload.model).toBe('claude-opus-5-5-low')
       expect(payload.request.systemInstruction?.parts?.[0]?.text).toBe(system)
       expect(payload.request.systemInstruction?.parts?.some(part => part.text?.includes(tail) === true)).toBe(true)
       expect(payload.request.systemInstruction?.parts?.some(part => part.text?.includes('CRITICAL TOOL USAGE INSTRUCTIONS') === true)).toBe(true)
@@ -167,7 +167,7 @@ describe('Antigravity LLM adapter', () => {
     })
 
     await expect(collectThroughRuntime(adapter, options({
-      model: 'antigravity-claude-opus-4-6-thinking',
+      model: 'antigravity-claude-opus-5-5',
       system,
       tools: [{ name: 'lookup', description: 'Lookup', parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } }],
     }))).resolves.toContainEqual(expect.objectContaining({
@@ -179,7 +179,7 @@ describe('Antigravity LLM adapter', () => {
   })
 
   it('replays Claude tool calls and results with matching ids while dropping unsigned reasoning', async () => {
-    const model = 'antigravity-claude-opus-4-6-thinking'
+    const model = 'antigravity-claude-opus-5-5'
     const bashCallId = 'toolu_vrtx_bash'
     const globCallId = 'toolu_vrtx_glob'
     const assistant = {
@@ -271,7 +271,7 @@ describe('Antigravity LLM adapter', () => {
       transport: { request: vi.fn(async () => new Response(body, { status: 400, headers: { 'content-type': 'text/event-stream' } })) },
     })
 
-    const chunks = await collectThroughRuntime(adapter, options({ model: 'antigravity-claude-opus-4-6-thinking' }))
+    const chunks = await collectThroughRuntime(adapter, options({ model: 'antigravity-claude-opus-5-5' }))
     expect(chunks.at(-1)).toMatchObject({
       type: 'finish',
       reason: {
@@ -303,7 +303,7 @@ describe('Antigravity LLM adapter', () => {
       transport: { request: vi.fn(async () => new Response(body, { status: 400 })) },
     })
 
-    const chunks = await collectThroughRuntime(adapter, options({ model: 'antigravity-claude-opus-4-6-thinking' }))
+    const chunks = await collectThroughRuntime(adapter, options({ model: 'antigravity-claude-opus-5-5' }))
     expect(chunks.at(-1)).toMatchObject({
       type: 'finish',
       reason: { kind: 'error', failure: { code: CONTEXT_WINDOW_EXCEEDED_CODE, status: 400 } },
@@ -328,7 +328,7 @@ describe('Antigravity LLM adapter', () => {
       transport: { request: vi.fn(async () => new Response(body, { status: 400 })) },
     })
 
-    const chunks = await collectThroughRuntime(adapter, options({ model: 'antigravity-claude-opus-4-6-thinking' }))
+    const chunks = await collectThroughRuntime(adapter, options({ model: 'antigravity-claude-opus-5-5' }))
     expect(chunks.at(-1)).toMatchObject({
       type: 'finish',
       reason: { kind: 'error', failure: { code: CONTEXT_WINDOW_EXCEEDED_CODE, status: 400 } },
@@ -350,7 +350,7 @@ describe('Antigravity LLM adapter', () => {
       transport: { request: vi.fn(async () => new Response(`data: ${event}\n\n`)) },
     })
 
-    const chunks = await collectThroughRuntime(adapter, options({ model: 'antigravity-claude-opus-4-6-thinking' }))
+    const chunks = await collectThroughRuntime(adapter, options({ model: 'antigravity-claude-opus-5-5' }))
     expect(chunks.at(-1)).toMatchObject({
       type: 'finish',
       reason: { kind: 'error', failure: { code: CONTEXT_WINDOW_EXCEEDED_CODE, status: 400 } },
@@ -372,7 +372,7 @@ describe('Antigravity LLM adapter', () => {
       transport: { request: vi.fn(async () => new Response(body, { status: 400 })) },
     })
 
-    const chunks = await collectThroughRuntime(adapter, options({ model: 'antigravity-claude-opus-4-6-thinking' }))
+    const chunks = await collectThroughRuntime(adapter, options({ model: 'antigravity-claude-opus-5-5' }))
     expect(chunks.at(-1)).toMatchObject({
       type: 'finish',
       reason: { kind: 'error', failure: { code: 'PROTOCOL_DRIFT', status: 400 } },
@@ -386,7 +386,7 @@ describe('Antigravity LLM adapter', () => {
       transport: { request: vi.fn(async () => new Response(body, { status: 400 })) },
     })
 
-    const chunks = await collectThroughRuntime(adapter, options({ model: 'antigravity-claude-opus-4-6-thinking' }))
+    const chunks = await collectThroughRuntime(adapter, options({ model: 'antigravity-claude-opus-5-5' }))
     expect(chunks.at(-1)).toMatchObject({
       type: 'finish',
       reason: { kind: 'error', failure: { code: 'PROTOCOL_DRIFT', status: 400 } },
@@ -406,7 +406,7 @@ describe('Antigravity LLM adapter', () => {
         auth: { credential: vi.fn(async () => credential('opaque-test-value')) },
         transport: { request: vi.fn(async () => new Response(body, { status: 400 })) },
       })
-      const chunks = await collectThroughRuntime(adapter, options({ model: 'antigravity-claude-opus-4-6-thinking' }))
+      const chunks = await collectThroughRuntime(adapter, options({ model: 'antigravity-claude-opus-5-5' }))
       expect(chunks.at(-1)).toMatchObject({
         type: 'finish',
         reason: { kind: 'error', failure: { code: 'PROTOCOL_DRIFT', status: 400 } },
@@ -431,7 +431,7 @@ describe('Antigravity LLM adapter', () => {
         ...('maxResponseBytes' in fixture ? { maxResponseBytes: fixture.maxResponseBytes } : {}),
         ...('maxFrameBytes' in fixture ? { maxFrameBytes: fixture.maxFrameBytes } : {}),
       })
-      const chunks = await collectThroughRuntime(adapter, options({ model: 'antigravity-claude-opus-4-6-thinking' }))
+      const chunks = await collectThroughRuntime(adapter, options({ model: 'antigravity-claude-opus-5-5' }))
       expect(chunks.at(-1)).toMatchObject({
         type: 'finish',
         reason: { kind: 'error', failure: { code: 'PROTOCOL_DRIFT', status: 400 } },
@@ -465,7 +465,7 @@ describe('Antigravity LLM adapter', () => {
     })
 
     const chunks = await collectThroughRuntime(adapter, options({
-      model: 'antigravity-claude-opus-4-6-thinking',
+      model: 'antigravity-claude-opus-5-5',
       signal: controller.signal,
     }))
     expect(chunks.at(-1)).toMatchObject({
@@ -492,7 +492,7 @@ describe('Antigravity LLM adapter', () => {
       totalTimeoutMs: fixture.totalTimeoutMs,
     })
 
-    const chunks = await collectThroughRuntime(adapter, options({ model: 'antigravity-claude-opus-4-6-thinking' }))
+    const chunks = await collectThroughRuntime(adapter, options({ model: 'antigravity-claude-opus-5-5' }))
     expect(chunks.at(-1)).toMatchObject({
       type: 'finish',
       reason: { kind: 'error', failure: { code: 'PROTOCOL_DRIFT', status: 400 } },
@@ -597,7 +597,7 @@ describe('Antigravity LLM adapter', () => {
     }
     const adapter = new AntigravityAdapter({ auth, transport })
     const chunks: StreamChunk[] = []
-    for await (const chunk of adapter.stream(options({ model: 'antigravity-gemini-3.7-flash' }))) chunks.push(chunk)
+    for await (const chunk of adapter.stream(options({ model: 'antigravity-gemini-3.8-flash' }))) chunks.push(chunk)
     expect(rotateOnFailure).toHaveBeenCalledWith(expect.objectContaining({ status: 429, family: 'gemini' }))
     expect(transport.request).toHaveBeenCalledTimes(2)
     expect(auth.credential).toHaveBeenCalledTimes(2)
@@ -705,7 +705,7 @@ describe('Antigravity LLM adapter', () => {
     const transport = {
       request: vi.fn(async (_input: PrivateTransportRequest) => new Response(JSON.stringify({
         models: {
-          'gemini-3.7-flash-medium': { displayName: 'Gemini live' },
+          'gemini-3.8-flash-medium': { displayName: 'Gemini live' },
           'provider-unknown-model': { displayName: 'Unknown' },
         },
       }))),
@@ -714,7 +714,7 @@ describe('Antigravity LLM adapter', () => {
 
     const models = await adapter.listModels(ANTIGRAVITY_PROVIDER)
 
-    expect(models.map(model => model.id)).toEqual(['antigravity-gemini-3.7-flash'])
+    expect(models.map(model => model.id)).toEqual(['antigravity-gemini-3.8-flash'])
     expect(transport.request).toHaveBeenCalledOnce()
     expect(transport.request.mock.calls[0]?.[0]).toMatchObject({
       url: ANTIGRAVITY_AVAILABLE_MODELS_ENDPOINT,
@@ -731,7 +731,7 @@ describe('Antigravity LLM adapter', () => {
     expect(live.catalogSnapshot()).toMatchObject({ state: 'snapshot' })
     const liveView = await live.modelCatalog()
     expect(liveView.state).toBe('live-available')
-    expect(liveView.models.find(model => model.id === 'antigravity-gemini-3.7-flash')?.state).toBe('live-available')
+    expect(liveView.models.find(model => model.id === 'antigravity-gemini-3.8-flash')?.state).toBe('live-available')
     expect(liveView.models.some(model => model.state === 'unavailable')).toBe(true)
 
     const rateLimited = new AntigravityAdapter({
@@ -751,9 +751,9 @@ describe('Antigravity LLM adapter', () => {
     const transport = { request: vi.fn(async () => new Response(JSON.stringify({ models: {} }))) }
     const adapter = new AntigravityAdapter({ auth: { credential: vi.fn(async () => credential('access')) }, transport })
 
-    await expect(adapter.resolveModel(ANTIGRAVITY_PROVIDER, 'antigravity-gemini-3.7-flash')).resolves.toMatchObject({
+    await expect(adapter.resolveModel(ANTIGRAVITY_PROVIDER, 'antigravity-gemini-3.8-flash')).resolves.toMatchObject({
       provider: ANTIGRAVITY_PROVIDER,
-      id: 'antigravity-gemini-3.7-flash',
+      id: 'antigravity-gemini-3.8-flash',
     })
     expect(transport.request).not.toHaveBeenCalled()
   })
@@ -921,7 +921,7 @@ describe('Antigravity LLM adapter', () => {
       {
         id: 'assistant-1',
         role: 'assistant',
-        source: { kind: 'model', provider: ANTIGRAVITY_PROVIDER, model: 'antigravity-gemini-3.7-flash' },
+        source: { kind: 'model', provider: ANTIGRAVITY_PROVIDER, model: 'antigravity-gemini-3.8-flash' },
         content: [{ type: 'tool-call', id: toolCallId, name: 'lookup_weather', arguments: '{"city":"Paris"}' }],
       } as Message,
       {
@@ -943,7 +943,7 @@ describe('Antigravity LLM adapter', () => {
     const assistant = (name: string, argumentsText: string): Message => ({
       id: `assistant-${name}` as never,
       role: 'assistant',
-      source: { kind: 'model', provider: ANTIGRAVITY_PROVIDER, model: 'antigravity-gemini-3.7-flash' },
+      source: { kind: 'model', provider: ANTIGRAVITY_PROVIDER, model: 'antigravity-gemini-3.8-flash' },
       content: [{ type: 'tool-call', id: reusedCallId as never, name, arguments: argumentsText }],
     } as Message)
     const result = (name: string, text: string): Message => ({
@@ -994,8 +994,8 @@ describe('Antigravity LLM adapter', () => {
     ])
 
     const claude = buildAntigravityGeneratePayload(options({
-      model: 'antigravity-claude-opus-4-6-thinking',
-      messages: [assistant('antigravity-claude-opus-4-6-thinking', [
+      model: 'antigravity-claude-opus-5-5',
+      messages: [assistant('antigravity-claude-opus-5-5', [
         { type: 'tool-call', id: 'call-0', name: 'grep', arguments: '{}' },
         { type: 'tool-call', id: 'call-1', name: 'edit', arguments: '{}' },
       ])],
@@ -1006,7 +1006,7 @@ describe('Antigravity LLM adapter', () => {
   })
 
   it('suffixes a reused Claude call id deterministically so two rebuilds stay identical', () => {
-    const model = 'antigravity-claude-opus-4-6-thinking'
+    const model = 'antigravity-claude-opus-5-5'
     const reusedCallId = 'call_332562'
     const assistant = (name: string, argumentsText: string): Message => ({
       id: `assistant-${name}` as never,
@@ -1065,7 +1065,7 @@ describe('Antigravity LLM adapter', () => {
   }
 
   it('reuses the assigned id when a name repeats after a conflict instead of falling back to the raw id', () => {
-    const model = 'antigravity-claude-opus-4-6-thinking'
+    const model = 'antigravity-claude-opus-5-5'
     const reusedCallId = 'call_332562'
     const payload = buildAntigravityGeneratePayload(
       options({ model, messages: reusedIdHistory(reusedCallId, model, ['grep', 'edit', 'edit']) }),
@@ -1079,7 +1079,7 @@ describe('Antigravity LLM adapter', () => {
   })
 
   it('gives each conflicting name its own id when one call id alternates names', () => {
-    const model = 'antigravity-claude-opus-4-6-thinking'
+    const model = 'antigravity-claude-opus-5-5'
     const reusedCallId = 'call_332562'
     const payload = buildAntigravityGeneratePayload(
       options({ model, messages: reusedIdHistory(reusedCallId, model, ['grep', 'edit', 'grep']) }),
@@ -1109,7 +1109,7 @@ describe('Antigravity LLM adapter', () => {
   ]
 
   it('pairs each result with its own call when both calls precede their results under one reused id', () => {
-    const model = 'antigravity-claude-opus-4-6-thinking'
+    const model = 'antigravity-claude-opus-5-5'
     const reusedCallId = 'call_332562'
     const payload = buildAntigravityGeneratePayload(
       options({ model, messages: reusedIdBatchedHistory(reusedCallId, model, ['grep', 'edit']) }),
@@ -1123,7 +1123,7 @@ describe('Antigravity LLM adapter', () => {
   })
 
   it('pairs role=tool messages with their own call under one reused id', () => {
-    const model = 'antigravity-claude-opus-4-6-thinking'
+    const model = 'antigravity-claude-opus-5-5'
     const reusedCallId = 'call_332562'
     const history = reusedIdBatchedHistory(reusedCallId, model, ['grep', 'edit'])
     const assistant = history[0] as Message
@@ -1149,7 +1149,7 @@ describe('Antigravity LLM adapter', () => {
   })
 
   it('lets a later call of a reused id answer when an earlier call stayed unanswered', () => {
-    const model = 'antigravity-claude-opus-4-6-thinking'
+    const model = 'antigravity-claude-opus-5-5'
     const reusedCallId = 'call_332562'
     const assistant = (name: string): Message => ({
       id: `assistant-${name}` as never,
@@ -1177,7 +1177,7 @@ describe('Antigravity LLM adapter', () => {
   })
 
   it('streams a history whose provider call id was reused without failing the turn', async () => {
-    const model = 'antigravity-claude-opus-4-6-thinking'
+    const model = 'antigravity-claude-opus-5-5'
     const reusedCallId = 'call_332562'
     const assistant = (name: string, argumentsText: string): Message => ({
       id: `assistant-${name}` as never,
@@ -1247,6 +1247,8 @@ describe('Antigravity LLM adapter', () => {
   it('rejects unknown models and keeps request payloads free of access tokens', async () => {
     const adapter = new AntigravityAdapter({ auth: { credential: vi.fn(async () => credential('access-secret')) }, transport: { request: vi.fn() } })
     await expect(adapter.resolveModel(ANTIGRAVITY_PROVIDER, 'unknown-model')).rejects.toMatchObject({ code: 'INVALID_MODEL' })
+    await expect(adapter.resolveModel(ANTIGRAVITY_PROVIDER, 'antigravity-gemini-3.7-flash')).rejects.toMatchObject({ code: 'INVALID_MODEL' })
+    await expect(adapter.resolveModel(ANTIGRAVITY_PROVIDER, 'antigravity-claude-opus-4-6-thinking')).rejects.toMatchObject({ code: 'INVALID_MODEL' })
     const payload = buildAntigravityGeneratePayload(options({ tools: [{ name: 'lookup', description: 'Lookup', parameters: { type: 'object' } }] }), credential('access-secret'))
     const encoded = JSON.stringify(payload)
     expect(encoded).toContain('project-id')
@@ -1269,7 +1271,7 @@ describe('Antigravity LLM adapter', () => {
     expect(policy).toMatchObject({
       mode: 'normal',
       maxRetries: 2,
-      retryableCodes: ['EMPTY_RESPONSE', 'TIMEOUT', 'TRANSPORT', 'UPSTREAM', 'PROTOCOL_DRIFT'],
+      retryableCodes: ['EMPTY_RESPONSE', 'TIMEOUT', 'TRANSPORT', 'UPSTREAM'],
     })
 
     const chunks = await collectThroughRuntime(adapter, options())
@@ -1277,6 +1279,69 @@ describe('Antigravity LLM adapter', () => {
     expect(chunks.at(-1)).toMatchObject({
       type: 'finish',
       reason: { kind: 'error', failure: { code: 'TRANSPORT' } },
+    })
+
+    const request400 = vi.fn(async () => new Response('{"error":{"code":400,"message":"Invalid argument"}}', { status: 400 }))
+    const adapter400 = new AntigravityAdapter({
+      auth: { credential: vi.fn(async () => credential('access')) },
+      transport: { request: request400 },
+    })
+    const chunks400 = await collectThroughRuntime(adapter400, options({
+      model: 'antigravity-gemini-3.8-flash',
+      reasoningEffort: ReasoningEffortId('high'),
+    }))
+    expect(request400).toHaveBeenCalledTimes(1)
+    expect(chunks400.at(-1)).toMatchObject({
+      type: 'finish',
+      reason: { kind: 'error', failure: { code: 'PROTOCOL_DRIFT', status: 400 } },
+    })
+    const body37 = JSON.parse(String((request400.mock.calls[0] as unknown as [{ body: string }] | undefined)?.[0]?.body))
+    expect(body37.request.generationConfig.thinkingConfig).toEqual({
+      includeThoughts: true,
+      thinkingBudget: -1,
+    })
+  })
+
+  it('supports Gemini 4 Argon and Claude 5.5 models with native adaptive thinking configurations', async () => {
+    const adapter = new AntigravityAdapter({
+      auth: { credential: vi.fn(async () => credential('access')) },
+    })
+    await expect(adapter.resolveModel(ANTIGRAVITY_PROVIDER, 'antigravity-gemini-4-argon')).resolves.toMatchObject({
+      id: 'antigravity-gemini-4-argon',
+      defaultMaxTokens: 65536,
+      reasoning: { defaultEffort: ReasoningEffortId('medium') },
+    })
+    await expect(adapter.resolveModel(ANTIGRAVITY_PROVIDER, 'antigravity-claude-opus-5-5')).resolves.toMatchObject({
+      id: 'antigravity-claude-opus-5-5',
+      defaultMaxTokens: 128000,
+      reasoning: { defaultEffort: ReasoningEffortId('low') },
+    })
+
+    const argonPayload = buildAntigravityGeneratePayload(
+      options({ model: 'antigravity-gemini-4-argon', reasoningEffort: ReasoningEffortId('high') }),
+      credential('access'),
+    )
+    expect(argonPayload.model).toBe('gemini-4-argon-high')
+    expect((argonPayload.request as { generationConfig: unknown }).generationConfig).toEqual({
+      maxOutputTokens: 65536,
+      thinkingConfig: {
+        includeThoughts: true,
+        thinkingLevel: 'HIGH',
+      },
+    })
+
+    const claude55Payload = buildAntigravityGeneratePayload(
+      options({ model: 'antigravity-claude-opus-5-5', reasoningEffort: ReasoningEffortId('medium') }),
+      credential('access'),
+    )
+    expect(claude55Payload.model).toBe('claude-opus-5-5-medium')
+    expect((claude55Payload.request as { generationConfig: unknown }).generationConfig).toEqual({
+      maxOutputTokens: 128000,
+      thinkingConfig: {
+        includeThoughts: true,
+        thinkingBudget: 0,
+        thinkingLevel: 'MEDIUM',
+      },
     })
   })
 })

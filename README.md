@@ -14,12 +14,11 @@ Provides private Google OAuth 2.0 PKCE authentication, smart multi-account pooli
 
 ---
 
-## Highlights in v0.5.0
+## Highlights in v0.5.2
 
-- **Mid-Stream Host Retry Policy & Truncated Stream Recovery**: Exposes `providerRetryPolicy` (`maxRetries: 2`, `retryableCodes: ['EMPTY_RESPONSE', 'TIMEOUT', 'TRANSPORT', 'UPSTREAM', 'PROTOCOL_DRIFT']`) for host agent loops (`dsh-agent-loop` / `dsh-fast-loop`), and classifies mid-stream truncated Gzip (`Z_BUF_ERROR`), prematurely ended Chunked streams, and partial SSE JSON frames as retryable `offline` (`TRANSPORT`) errors.
-- **240s Stream Idle Timeout, 2MB Frame Limit & Zero-Overhead SSE**: Extends stream idle timeout from `120s` to `240s` and single-frame limit from `512KB` to `2MB` to accommodate Google's server-side buffering of large `functionCall` payloads (e.g., 40KB+ single-file generation), while eliminating redundant `plainText` accumulation once SSE framing is active.
-- **Auto-Refresh Status & Quota on Account Switch**: Clicking "Use this account" or removing an account in Web Settings now automatically invalidates Host quota cache, reloads account status without button flicker, and refreshes real-time 5h/weekly quota bars.
-- **`dsh-pet` Multi-Page Quota Bubble Integration**: Seamlessly registers a `shape: 'custom'` multi-page quota bubble (`Gemini` and `Claude` / `GPT-OSS`) when `dsh-pet` (`petApi7340`) is present, auto-prioritizing the active model family on page 1.
+- **Core Engine & CLI Fingerprint Sync (`@cortexkit/antigravity-auth-core@3.0.14`)**: Upgraded to the latest upstream core engine and synced wire identity to `antigravity/cli/1.3.5`.
+- **New Generation Live Models Support**: Added full support for `antigravity-gemini-4-argon` (1M context / 65K output with 3-tier thinking), `antigravity-claude-opus-5-5` & `antigravity-claude-sonnet-5-5` (1M context / 128K output with adaptive thinking and VALIDATED tool calls). Retired models (`3.1-pro`, `3.6-flash`, `3.7-flash`, `4-6-thinking`) are cleanly refused locally with `INVALID_MODEL`.
+- **Fixed HTTP 400 Retry & Hardened Schema Sanitization (Issue #11)**: Removed `PROTOCOL_DRIFT` from `providerRetryPolicy` so HTTP 400 errors fail immediately without redundant retries; hardened `sanitizeSchema` with `oneOf -> anyOf`, nullable type array normalization, and strict `required` property checks for Gemini Protobuf compatibility.
 ## Features
 
 ### 1. High-Performance Core Architecture
@@ -33,13 +32,12 @@ Provides private Google OAuth 2.0 PKCE authentication, smart multi-account pooli
 ### 2. Supported Models (`google-antigravity`)
 | Model Identifier | Display Name | Capabilities | Thinking Budget |
 | :--- | :--- | :--- | :--- |
+| `antigravity-gemini-4-argon` | Gemini 4 Argon | Text, Vision, Tools | Low / Medium / High |
 | `antigravity-gemini-3.8-flash` | Gemini 3.8 Flash | Text, Vision, Tools | Low / Medium / High |
-| `antigravity-gemini-3.7-flash` | Gemini 3.7 Flash | Text, Vision, Tools | Low / Medium / High |
-| `antigravity-gemini-3.6-flash` | Gemini 3.6 Flash | Text, Vision, Tools | Default |
-| `antigravity-gemini-3.1-pro` | Gemini 3.1 Pro | Text, Vision, Tools | Low / High |
-| `claude-sonnet-4-6-thinking` | Claude Sonnet 4.6 | Text, Vision, Tools | Dynamic Reasoning |
-| `claude-opus-4-6-thinking` | Claude Opus 4.6 | Text, Vision, Tools | Dynamic Reasoning |
-| `gpt-oss-120b-medium` | GPT-OSS 120B | Text, Tools | Fixed Effort |
+| `antigravity-gemini-3.5-flash` | Gemini 3.5 Flash | Text, Vision, Tools | Low / Medium / High |
+| `antigravity-claude-opus-5-5` | Claude Opus 5.5 | Text, Vision, Tools | Low / Medium / High |
+| `antigravity-claude-sonnet-5-5` | Claude Sonnet 5.5 | Text, Vision, Tools | Low / Medium / High |
+| `antigravity-gpt-oss-120b-medium` | GPT-OSS 120B Medium | Text, Vision, Tools | Fixed Effort |
 
 ### 3. Nano Banana 2 Image Generation & Multi-Turn Editing
 - **`generate_image`**: Prompt-based image creation and iterative image-to-image editing powered by Nano Banana 2 (`gemini-3.1-flash-image`) using session references.

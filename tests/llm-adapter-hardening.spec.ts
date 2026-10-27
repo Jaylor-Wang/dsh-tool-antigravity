@@ -74,6 +74,51 @@ describe('LLM adapter hardening: Tool schemas', () => {
     expect(props.mode?.enum).toEqual(['auto', 'manual'])
     expect(props.emptyOnly?.enum).toBeUndefined()
   })
+
+  it('normalizes nullable type arrays, oneOf/const unions, and undefined required fields for Gemini wire', () => {
+    const tools: ToolSchema[] = [
+      {
+        name: 'knowledge_tool',
+        description: 'Knowledge tool with nullable arrays and oneOf const unions',
+        parameters: {
+          type: 'object',
+          properties: {
+            action: {
+              type: 'string',
+              oneOf: [
+                { const: 'knowledge.list', description: 'List items' },
+                { const: 'knowledge.save', description: 'Save item' },
+              ],
+            },
+            planId: {
+              type: ['string', 'null'],
+              description: 'Optional nullable plan id',
+            },
+            workingDirectory: {
+              oneOf: [{ type: 'null', const: null }, { type: 'string' }],
+              description: 'Nullable working directory union',
+            },
+          },
+          required: ['action', 'nonexistentField'],
+        },
+      },
+    ]
+
+    const payload = buildAntigravityGeneratePayload({
+      provider: 'google-antigravity',
+      model: 'antigravity-gemini-3.8-flash',
+      messages: [{ id: 'm1' as never, role: 'user', content: [{ type: 'text', text: 'hi' }], source: { kind: 'user' } }],
+      tools,
+    }, MOCK_CREDENTIAL)
+
+    const wire = JSON.stringify((payload.request as { tools: unknown }).tools)
+    expect(wire).not.toContain('"oneOf"')
+    expect(wire).not.toContain('"allOf"')
+    expect(wire).not.toContain('nonexistentField')
+    expect(wire).not.toMatch(/"type"\s*:\s*\[/)
+    expect(wire).toContain('"anyOf"')
+    expect(wire).toContain('"nullable":true')
+  })
 })
 
 describe('LLM adapter hardening: Tool responses and deduplication', () => {
@@ -89,7 +134,7 @@ describe('LLM adapter hardening: Tool responses and deduplication', () => {
         id: 'msg-2' as never,
         role: 'assistant',
         content: [{ type: 'tool-call', id: 'call_1' as never, name: 'pwsh', arguments: '{"command":"dir"}' }],
-        source: { kind: 'model', provider: 'google-antigravity', model: 'antigravity-gemini-3.7-flash' },
+        source: { kind: 'model', provider: 'google-antigravity', model: 'antigravity-gemini-3.8-flash' },
       },
       {
         id: 'msg-3' as never,
@@ -103,7 +148,7 @@ describe('LLM adapter hardening: Tool responses and deduplication', () => {
 
     const payload = buildAntigravityGeneratePayload({
       provider: 'google-antigravity',
-      model: 'antigravity-gemini-3.7-flash',
+      model: 'antigravity-gemini-3.8-flash',
       messages,
     }, MOCK_CREDENTIAL)
 
@@ -130,7 +175,7 @@ describe('LLM adapter hardening: Tool responses and deduplication', () => {
         id: 'msg-2' as never,
         role: 'assistant',
         content: [{ type: 'tool-call', id: 'call_1' as never, name: 'read', arguments: '{"file":"a.txt"}' }],
-        source: { kind: 'model', provider: 'google-antigravity', model: 'antigravity-gemini-3.7-flash' },
+        source: { kind: 'model', provider: 'google-antigravity', model: 'antigravity-gemini-3.8-flash' },
       },
       {
         id: 'msg-3' as never,
@@ -143,7 +188,7 @@ describe('LLM adapter hardening: Tool responses and deduplication', () => {
 
     const payload = buildAntigravityGeneratePayload({
       provider: 'google-antigravity',
-      model: 'antigravity-gemini-3.7-flash',
+      model: 'antigravity-gemini-3.8-flash',
       messages,
     }, MOCK_CREDENTIAL)
 
@@ -183,7 +228,7 @@ describe('LLM adapter hardening: Offloaded images projection', () => {
 
     const payload = buildAntigravityGeneratePayload({
       provider: 'google-antigravity',
-      model: 'antigravity-gemini-3.7-flash',
+      model: 'antigravity-gemini-3.8-flash',
       messages,
     }, MOCK_CREDENTIAL)
 

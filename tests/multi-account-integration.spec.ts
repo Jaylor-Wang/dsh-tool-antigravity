@@ -339,7 +339,7 @@ describe('D: LLM 429 automatically rotates accounts and recovers generation', ()
     const chunks = []
     for await (const chunk of adapter.stream({
       provider: 'google-antigravity',
-      model: 'antigravity-gemini-3.7-flash',
+      model: 'antigravity-gemini-3.8-flash',
       messages: [{
         id: 'msg-1' as never,
         role: 'user',

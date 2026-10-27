@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@cortexkit/antigravity-auth-core':
-        specifier: 2.2.0
-        version: 2.2.0
+        specifier: 3.0.14
+        version: 3.0.14
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: 4.0.2
@@ -190,8 +190,22 @@ packages:
     resolution: {integrity: sha512-ctxtJ/eA+t+6q2++vj5j7FYX3nRu311q1wfYH3xjlLOsczhlhxAg2FWNUXhpGvAw3BWo1xBcvOV6/YLc2r5FJw==}
     hasBin: true
 
-  '@cortexkit/antigravity-auth-core@2.2.0':
-    resolution: {integrity: sha512-TEv4ZFTASmaIqilZBqyAjzs2HaIhSHI39oBGT75LMnakNqHkhR73JTddsCUuz/c9qB5QWxXse+Kpn11HAV0ofQ==}
+  '@cortexkit/antigravity-auth-core@3.0.14':
+    resolution: {integrity: sha512-drNHr+y0S9UolUxfmKE0gcLY8ewBooqXdo+z5uEjdIZw/jWAjxBLilmMw/aOu2DUKG5Ho5WCkMk3z5TJoLE8lA==}
+
+  '@cortexkit/claustrum-client@0.12.0':
+    resolution: {integrity: sha512-Eqo2V8XgVzbZvolFYn11HX0TMRt21pnc9bWLYkcT4KW6kJ2fFLkzvXGzQ++MOmQpq8Bd3Jl5xA6yKkXTnimDOw==}
+
+  '@cortexkit/private-files@0.2.1':
+    resolution: {integrity: sha512-U7ofFl45DDYScXo7vSV/4OPxn0xC1mflKpW8tbK8/3OaRd9q+TDEY25UWO8itXtSAlhBMqhZBZ3NxZNL5IyrSg==}
+
+  '@cortexkit/store@0.2.3':
+    resolution: {integrity: sha512-cOCjAhb2rJp9u71xHXTlb2tS67237hHVN5DCB+aVh9S/FSu1UjOj8j/LjTSnVAZYXrNuWWb8eoQghiEcDtNT8g==}
+    engines: {node: '>=18'}
+
+  '@cortexkit/subc-client@0.22.5':
+    resolution: {integrity: sha512-C3yw60RtmWDsG6wXtEBRA+T2ybUFbIjfaAnQmuf3HIlWniLOBWoYNwMVdcUORc3wxegE5vC58DFhA3VPJ9+aAw==}
+    engines: {node: '>=18'}
 
   '@csstools/color-helpers@6.1.1':
     resolution: {integrity: sha512-gLNsunvwf3mCi5u5o46/Z/JcJMnhbHSaZ69rkgPzNM3J4s8hWwpPUQB6/tt0EDFyCiWzxANlx+2LJwpYj4zS1w==}
@@ -1587,10 +1601,26 @@ snapshots:
     dependencies:
       css-tree: 3.2.1
 
-  '@cortexkit/antigravity-auth-core@2.2.0':
+  '@cortexkit/antigravity-auth-core@3.0.14':
     dependencies:
+      '@cortexkit/claustrum-client': 0.12.0
+      '@cortexkit/private-files': 0.2.1
+      '@cortexkit/subc-client': 0.22.5
       xdg-basedir: 5.1.0
       zod: 4.4.3
+
+  '@cortexkit/claustrum-client@0.12.0':
+    dependencies:
+      '@cortexkit/store': 0.2.3
+      '@cortexkit/subc-client': 0.22.5
+
+  '@cortexkit/private-files@0.2.1': {}
+
+  '@cortexkit/store@0.2.3':
+    dependencies:
+      '@cortexkit/private-files': 0.2.1
+
+  '@cortexkit/subc-client@0.22.5': {}
 
   '@csstools/color-helpers@6.1.1': {}
 

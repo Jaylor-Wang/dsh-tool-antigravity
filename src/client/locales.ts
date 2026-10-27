@@ -119,7 +119,7 @@ export const en = {
   quotaWeekly: 'Weekly window',
   searchCardIntro: 'Google Antigravity Search Provider used by the stock web_search tool.',
   imageCardIntro: 'Durable image generation tools for Nano Banana 2 (gemini-3.1-flash-image).',
-  videoCardIntro: 'Workspace MP4 video understanding tools for multimodal models (gemini-3.7-flash).',
+  videoCardIntro: 'Workspace MP4 video understanding tools for multimodal models (gemini-3.8-flash).',
   privacyNotice: 'Share Antigravity login state and model routing.',
   relogin: 'Log in a new account',
   authCardTitle: 'Login',

@@ -32,7 +32,7 @@ function rpcFixture(
     revoke: vi.fn().mockResolvedValue({ ok: true, value: { state: 'revoked' } }),
     models: vi.fn().mockResolvedValue({ ok: true, value: {
       state: 'snapshot',
-      models: [{ id: 'antigravity-gemini-3.7-flash', name: 'Gemini 3.7 Flash', state: 'snapshot' }],
+      models: [{ id: 'antigravity-gemini-3.8-flash', name: 'Gemini 3.8 Flash', state: 'snapshot' }],
     } }),
     usage: vi.fn().mockResolvedValue({ ok: true, value: { state: 'unknown' } }),
     getProxy: vi.fn().mockResolvedValue({ ok: true, value: { proxy: '' } }),

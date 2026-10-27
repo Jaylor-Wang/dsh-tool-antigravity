@@ -6,12 +6,15 @@ import {
   CLAUDE_DESCRIPTION_PROMPT,
   CLAUDE_TOOL_SYSTEM_INSTRUCTION,
   SKIP_THOUGHT_SIGNATURE,
+  applyAgyNativeGenerationConfig,
   applyClaudeTransforms,
   applyGeminiTransforms,
   buildAgyAgentRequestMetadata,
   fnv1a64Signed,
+  getAgyNativeModel,
   getPublicModelDefinitions,
   getResolverAliasMap,
+  isGeminiArgonModel,
   orderAgyRequestPayloadInPlace,
   resolveModelWithTier,
 } from '@cortexkit/antigravity-auth-core'
@@ -180,7 +183,7 @@ export class AntigravityAdapter extends LlmAdapter {
     return resolveRetryPolicy({
       mode: 'normal',
       maxRetries: 2,
-      retryableCodes: ['EMPTY_RESPONSE', 'TIMEOUT', 'TRANSPORT', 'UPSTREAM', 'PROTOCOL_DRIFT'],
+      retryableCodes: ['EMPTY_RESPONSE', 'TIMEOUT', 'TRANSPORT', 'UPSTREAM'],
       backoff: { initialDelayMs: 1000, maxDelayMs: 5000, jitterRatio: 0.1 },
     }, 'google-antigravity')
   }
@@ -623,23 +626,26 @@ function cleanModelDisplayName(name: string): string {
 
 function getModelReasoningEfforts(modelId: string): { efforts: readonly { id: ReturnType<typeof ReasoningEffortId>; name: string }[]; defaultEffort: ReturnType<typeof ReasoningEffortId> } | undefined {
   const lower = modelId.toLowerCase()
-  if (lower.includes('flash') && !lower.includes('image')) {
+  if (lower.includes('gemini-4-argon') || (lower.includes('flash') && !lower.includes('image'))) {
     return {
       efforts: [
         { id: ReasoningEffortId('low'), name: 'Low' },
         { id: ReasoningEffortId('medium'), name: 'Medium' },
         { id: ReasoningEffortId('high'), name: 'High' },
       ],
-      defaultEffort: ReasoningEffortId(lower.includes('gemini-3.8-flash') ? 'medium' : 'high'),
+      defaultEffort: ReasoningEffortId(
+        lower.includes('gemini-4-argon') || lower.includes('gemini-3.8-flash') ? 'medium' : 'high',
+      ),
     }
   }
-  if (lower.includes('pro')) {
+  if (lower.includes('claude-sonnet-5-5') || lower.includes('claude-opus-5-5')) {
     return {
       efforts: [
         { id: ReasoningEffortId('low'), name: 'Low' },
+        { id: ReasoningEffortId('medium'), name: 'Medium' },
         { id: ReasoningEffortId('high'), name: 'High' },
       ],
-      defaultEffort: ReasoningEffortId('high'),
+      defaultEffort: ReasoningEffortId('low'),
     }
   }
   return undefined
@@ -687,17 +693,35 @@ function parseLiveModelIds(
     live.add(canonicalWireModel(cleanId, aliases))
     live.add(cleanId)
     live.add(id)
-    if (cleanId === 'gemini-3-flash' || cleanId === 'gemini-3-flash-agent' || cleanId === 'gemini-3.7-flash-tiered' || cleanId.startsWith('gemini-3-flash') || cleanId.startsWith('gemini-3.7-flash')) {
-      live.add('gemini-3.7-flash')
-      live.add('gemini-3.7-flash-medium')
-      live.add('gemini-3.7-flash-low')
-      live.add('gemini-3.7-flash-high')
+    if (cleanId === 'gemini-3-flash' || cleanId === 'gemini-3-flash-agent' || cleanId.startsWith('gemini-3-flash') || cleanId.startsWith('gemini-3.5-flash')) {
+      live.add('gemini-3.5-flash')
+      live.add('gemini-3-flash-agent')
+      live.add('gemini-3.5-flash-low')
+      live.add('gemini-3.5-flash-extra-low')
     }
     if (cleanId === 'gemini-3.8-flash-tiered' || cleanId.startsWith('gemini-3.8-flash')) {
       live.add('gemini-3.8-flash')
       live.add('gemini-3.8-flash-medium')
       live.add('gemini-3.8-flash-low')
       live.add('gemini-3.8-flash-high')
+    }
+    if (cleanId.startsWith('gemini-4-argon')) {
+      live.add('gemini-4-argon')
+      live.add('gemini-4-argon-low')
+      live.add('gemini-4-argon-medium')
+      live.add('gemini-4-argon-high')
+    }
+    if (cleanId.startsWith('claude-sonnet-5-5')) {
+      live.add('claude-sonnet-5-5')
+      live.add('claude-sonnet-5-5-low')
+      live.add('claude-sonnet-5-5-medium')
+      live.add('claude-sonnet-5-5-high')
+    }
+    if (cleanId.startsWith('claude-opus-5-5')) {
+      live.add('claude-opus-5-5')
+      live.add('claude-opus-5-5-low')
+      live.add('claude-opus-5-5-medium')
+      live.add('claude-opus-5-5-high')
     }
     if (rawEntry.modelName !== undefined && typeof rawEntry.modelName === 'string') {
       if (!safeModelId(rawEntry.modelName)) throw new LlmError('The Antigravity live model catalog did not match the audited schema', 'PROTOCOL_DRIFT')
@@ -719,12 +743,12 @@ function parseLiveModelIds(
       || live.has(cleanResolved)
       || live.has(resolved)
       || live.has(definition.id)
-      || (definition.id === 'antigravity-gemini-3.7-flash' && (
+      || (definition.id === 'antigravity-gemini-3.5-flash' && (
         live.has('gemini-3-flash')
         || live.has('gemini-3-flash-agent')
-        || live.has('gemini-3.7-flash-tiered')
-        || live.has('gemini-3.7-flash')
-        || live.has('gemini-3.7-flash-medium')
+        || live.has('gemini-3.5-flash')
+        || live.has('gemini-3.5-flash-low')
+        || live.has('gemini-3.5-flash-extra-low')
       ))
     ) {
       available.add(definition.id)
@@ -1050,30 +1074,41 @@ function buildPayloadFromContents(
     const declarations = buildFunctionDeclarations(options.tools)
     if (declarations.length > 0) request.tools = [{ functionDeclarations: declarations }]
   }
-  const resolved = resolveModelWithTier(usesCapturedGemini38ThinkingBudget ? wireModel : options.model, { cli_first: false })
+  const tieredModel = resolveModelForTier(options.model, options.reasoningEffort)
+  const resolved = resolveModelWithTier(usesCapturedGemini38ThinkingBudget ? wireModel : tieredModel)
+  const nativeModel = getAgyNativeModel(wireModel)
+  const usesAdaptiveNativeThinking = isGeminiArgonModel(wireModel) || nativeModel?.supportsAdaptiveThinking === true
+  const usesNumericGeminiThinkingBudget = !wireModel.toLowerCase().includes('claude') && !usesAdaptiveNativeThinking && typeof resolved.thinkingBudget === 'number'
   const requestedEffort = normalizeReasoningEffort(options.reasoningEffort)
   const thinkingLevel = requestedEffort ?? resolved.thinkingLevel
   if (wireModel.toLowerCase().includes('claude')) {
     applyClaudeToolHardening(request)
     applyClaudeTransforms(request, {
       model: wireModel,
-      ...(resolved.thinkingBudget === undefined ? {} : { tierThinkingBudget: resolved.thinkingBudget }),
-      ...(options.reasoningEffort === undefined && resolved.thinkingBudget === undefined ? {} : { normalizedThinking: { includeThoughts: true, ...(resolved.thinkingBudget === undefined ? {} : { thinkingBudget: resolved.thinkingBudget }) } }),
+      ...(resolved.thinkingBudget === undefined || usesAdaptiveNativeThinking ? {} : { tierThinkingBudget: resolved.thinkingBudget }),
+      ...(usesAdaptiveNativeThinking || (options.reasoningEffort === undefined && resolved.thinkingBudget === undefined) ? {} : { normalizedThinking: { includeThoughts: true, ...(resolved.thinkingBudget === undefined ? {} : { thinkingBudget: resolved.thinkingBudget }) } }),
       cleanJSONSchema: value => isRecord(value) ? value : { type: 'object', properties: {} },
     })
+    if (usesAdaptiveNativeThinking) {
+      const transformedConfig = isRecord(request.generationConfig) ? request.generationConfig : {}
+      applyAgyNativeGenerationConfig(wireModel, transformedConfig)
+      request.generationConfig = transformedConfig
+    }
   } else {
     applyGeminiTransforms(request, {
       model: wireModel,
-      ...(thinkingLevel === undefined || usesCapturedGemini38ThinkingBudget ? {} : { tierThinkingLevel: thinkingLevel as 'low' | 'medium' | 'high' }),
-      ...(resolved.thinkingBudget === undefined ? {} : { tierThinkingBudget: resolved.thinkingBudget }),
-      ...(options.reasoningEffort === undefined && resolved.thinkingBudget === undefined ? {} : { normalizedThinking: { includeThoughts: true, ...(resolved.thinkingBudget === undefined ? {} : { thinkingBudget: resolved.thinkingBudget }) } }),
+      ...(thinkingLevel === undefined || usesNumericGeminiThinkingBudget || usesAdaptiveNativeThinking ? {} : { tierThinkingLevel: thinkingLevel as 'low' | 'medium' | 'high' }),
+      ...(resolved.thinkingBudget === undefined || usesAdaptiveNativeThinking ? {} : { tierThinkingBudget: resolved.thinkingBudget }),
+      ...(usesAdaptiveNativeThinking || (options.reasoningEffort === undefined && resolved.thinkingBudget === undefined) ? {} : { normalizedThinking: { includeThoughts: true, ...(resolved.thinkingBudget === undefined ? {} : { thinkingBudget: resolved.thinkingBudget }) } }),
     })
-    if (usesCapturedGemini38ThinkingBudget) {
-      const transformedConfig = request.generationConfig
-      if (!isRecord(transformedConfig) || typeof resolved.thinkingBudget !== 'number') {
-        throw new LlmError('The Gemini 3.8 captured thinking configuration could not be resolved', 'PROTOCOL_DRIFT')
-      }
+    if (usesAdaptiveNativeThinking) {
+      const transformedConfig = isRecord(request.generationConfig) ? request.generationConfig : {}
+      applyAgyNativeGenerationConfig(wireModel, transformedConfig)
+      request.generationConfig = transformedConfig
+    } else if (usesNumericGeminiThinkingBudget && typeof resolved.thinkingBudget === 'number') {
+      const transformedConfig = isRecord(request.generationConfig) ? request.generationConfig : {}
       transformedConfig.thinkingConfig = { includeThoughts: true, thinkingBudget: resolved.thinkingBudget }
+      request.generationConfig = transformedConfig
     }
   }
   const project = credential.projectId === 'inductive-dreamer-qrkws' || !credential.projectId ? undefined : credential.projectId
@@ -1392,25 +1427,31 @@ function requireToolCallId(value: unknown): string {
   return value
 }
 
-function normalizeReasoningEffort(value: GenerateOptions['reasoningEffort']): string | undefined {
+function normalizeReasoningEffort(value: GenerateOptions['reasoningEffort']): 'low' | 'medium' | 'high' | undefined {
   if (value === undefined) return undefined
   const normalized = String(value).toLowerCase()
-  return ['minimal', 'low', 'medium', 'high'].includes(normalized) ? normalized : undefined
+  if (normalized === 'minimal' || normalized === 'low') return 'low'
+  if (normalized === 'medium') return 'medium'
+  if (normalized === 'high') return 'high'
+  return undefined
+}
+
+function resolveModelForTier(model: string, reasoningEffort?: GenerateOptions['reasoningEffort']): string {
+  const effort = normalizeReasoningEffort(reasoningEffort)
+  if (effort === undefined || /-(?:minimal|low|medium|high)$/iu.test(model)) return model
+  if (
+    /^(?:antigravity-)?gemini-3\.[58]-flash$/iu.test(model)
+    || /^(?:antigravity-)?gemini-4-argon$/iu.test(model)
+    || /^(?:antigravity-)?claude-(?:opus|sonnet)-5-5$/iu.test(model)
+  ) {
+    return `${model}-${effort}`
+  }
+  return model
 }
 
 function resolveWireModel(model: string, reasoningEffort?: GenerateOptions['reasoningEffort']): string {
-  if (model === 'antigravity-gemini-3.7-flash' || model === 'gemini-3.7-flash') {
-    return 'gemini-3-flash'
-  }
-  const effort = normalizeReasoningEffort(reasoningEffort)
-  const routeModel = effort !== undefined && (model === 'antigravity-gemini-3.8-flash' || model === 'gemini-3.8-flash')
-    ? `${model}-${effort}`
-    : model
-  const resolved = resolveModelWithTier(routeModel, { cli_first: false })
-  if (resolved.actualModel.startsWith('gemini-3.7-flash')) {
-    return 'gemini-3-flash'
-  }
-  return resolved.actualModel
+  const routeModel = resolveModelForTier(model, reasoningEffort)
+  return resolveModelWithTier(routeModel).actualModel
 }
 
 function requestSessionKey(options: GenerateOptions): string {
@@ -1784,7 +1825,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isRetryableNetworkError(error: unknown): boolean {
   if (!(error instanceof PrivateTransportError)) return false
-  return error.code === 'offline' || error.code === 'timeout' || error.code === 'upstream' || error.code === 'protocol-drift'
+  return error.code === 'offline' || error.code === 'timeout' || error.code === 'upstream'
 }
 
 async function waitRetryBackoff(delayMs: number, signal?: AbortSignal): Promise<void> {

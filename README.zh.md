@@ -14,12 +14,11 @@
 
 ---
 
-## v0.5.0 版本重要更新
+## v0.5.2 版本重要更新
 
-- **流中段宿主重试策略与截断流精准自愈**：在 `providerRetryPolicy` 中开放 `maxRetries: 2`（覆盖 `EMPTY_RESPONSE` / `TIMEOUT` / `TRANSPORT` / `UPSTREAM` / `PROTOCOL_DRIFT`），并将中途断流的 Gzip（`Z_BUF_ERROR`）、Chunked 提前 EOF 与末尾半截 SSE JSON 帧统一归类为可重试的 `offline`（`TRANSPORT`），彻底解决模型吐出思考摘要后发生网络断流时的重试死锁。
-- **240 秒流空闲超时、2MB 单帧上限与零冗余 SSE 缓冲**：将流式空闲超时从 `120s` 提升至 `240s`、单帧体积上限从 `512KB` 提升至 `2MB`，充分容纳 Google 服务端整包缓冲生成 40KB+ 大文件 `functionCall` 的耗时；一旦确认标准 SSE 帧即停止冗余 `plainText` 拼接。
-- **切换账号自动刷新状态与实时配额**：在 Web 设置面板点击“使用此账号”或“移除账号”时，自动失效宿主旧账号配额缓存、无闪烁更新账号列表状态，并自动触发新账号 5h/周配额看板的实时刷新。
-- **原生集成 `dsh-pet` 桌宠多页配额气泡**：当 `dsh-pet`（`petApi7340`）在场时自动注册 `shape: 'custom'` 声明式双页配额气泡（`Gemini` 与 `Claude` / `GPT-OSS`），支持根据当前选中模型自动优先排在首页。
+- **同步上游官方内核与协议指纹 (`@cortexkit/antigravity-auth-core@3.0.14`)**：升级至最新上游内核，客户端协议指纹升级至 `antigravity/cli/1.3.5`。
+- **全系新一代在服模型支持 (`Gemini 4 Argon` 与 `Claude 5.5`)**：新增 `antigravity-gemini-4-argon`（1M 上下文 / 65K 输出 / 3 档自适应思考）及 `antigravity-claude-opus-5-5` / `antigravity-claude-sonnet-5-5`（1M 上下文 / 128K 输出 / 3 档自适应思考与 VALIDATED 工具调用）；已退役旧模型（`3.1-pro` / `3.6-flash` / `3.7-flash` / `4-6-thinking`）在本地直接拦截为 `INVALID_MODEL`，不再向远端发送无效请求。
+- **修复 HTTP 400 盲目重试与 Schema 清洗加固 (Issue #11)**：从 `providerRetryPolicy` 中移除 `PROTOCOL_DRIFT`，HTTP 400 请求被拒时单次即停；全面支持工具 Schema 的 `oneOf` -> `anyOf` 转换、可空类型数组 `type: ['string', 'null']` 及 `required` 严格校验，消除 Gemini Protobuf 解析异常。
 ## 核心特性与架构设计
 
 ### 1. 高性能底层架构
@@ -33,13 +32,12 @@
 ### 2. 支持的模型列表 (`google-antigravity`)
 | 模型标识符 | 显示名称 | 核心模态 | 思考预算支持 |
 | :--- | :--- | :--- | :--- |
+| `antigravity-gemini-4-argon` | Gemini 4 Argon | 文本, 视觉, 工具 | Low / Medium / High |
 | `antigravity-gemini-3.8-flash` | Gemini 3.8 Flash | 文本, 视觉, 工具 | Low / Medium / High |
-| `antigravity-gemini-3.7-flash` | Gemini 3.7 Flash | 文本, 视觉, 工具 | Low / Medium / High |
-| `antigravity-gemini-3.6-flash` | Gemini 3.6 Flash | 文本, 视觉, 工具 | 默认档位 |
-| `antigravity-gemini-3.1-pro` | Gemini 3.1 Pro | 文本, 视觉, 工具 | Low / High |
-| `claude-sonnet-4-6-thinking` | Claude Sonnet 4.6 | 文本, 视觉, 工具 | 动态深度推理 |
-| `claude-opus-4-6-thinking` | Claude Opus 4.6 | 文本, 视觉, 工具 | 动态深度推理 |
-| `gpt-oss-120b-medium` | GPT-OSS 120B | 文本, 工具 | 固定档位 |
+| `antigravity-gemini-3.5-flash` | Gemini 3.5 Flash | 文本, 视觉, 工具 | Low / Medium / High |
+| `antigravity-claude-opus-5-5` | Claude Opus 5.5 | 文本, 视觉, 工具 | Low / Medium / High |
+| `antigravity-claude-sonnet-5-5` | Claude Sonnet 5.5 | 文本, 视觉, 工具 | Low / Medium / High |
+| `antigravity-gpt-oss-120b-medium` | GPT-OSS 120B Medium | 文本, 视觉, 工具 | 固定档位 |
 
 ### 3. Nano Banana 2 图片生成与多轮编辑工具
 - **`generate_image`**：依托 Nano Banana 2（`gemini-3.1-flash-image`）原生多模态能力，支持基于自然语言提示词的图像生成，以及基于会话图片的图生图/多轮编辑。
