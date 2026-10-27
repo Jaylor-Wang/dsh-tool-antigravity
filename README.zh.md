@@ -10,7 +10,7 @@
 
 为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) 打造的高性能 Antigravity 核心能力包插件。
 
-提供私有 Google OAuth 2.0 PKCE 认证闭环、全系多模型路由服务（`google-antigravity`）、会话持久化 Nano Banana 2 图片生成与多轮编辑工具（`generate_image` / `list_images`），以及具备 SWR 容错缓存与微光动效的实时 Web 设置面板与配额看板。
+提供私有 Google OAuth 2.0 PKCE 认证闭环、智能多账号池与额度用尽无感自动轮换、全系多模型路由服务（`google-antigravity`）、会话持久化 Nano Banana 2 图像生成与多轮编辑工具（`generate_image` / `list_images`），以及具备 SWR 容错缓存与实时配额看板的 Web 设置面板。
 
 ---
 

@@ -10,7 +10,7 @@ English | [中文](README.zh.md)
 
 High-performance, streamlined Antigravity capability bundle plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH).
 
-Provides private Google OAuth 2.0 PKCE authentication, multi-model LLM routing (`google-antigravity`), session-persistent Nano Banana 2 image generation and editing (`generate_image`, `list_images`), and an interactive Web settings panel with live quota visualization.
+Provides private Google OAuth 2.0 PKCE authentication, smart multi-account pooling with seamless quota failover, multi-model LLM routing (`google-antigravity`), session-persistent Nano Banana 2 image generation and editing (`generate_image`, `list_images`), and an interactive Web settings panel with live quota visualization.
 
 ---
 
