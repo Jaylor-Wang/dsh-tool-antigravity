@@ -1253,4 +1253,30 @@ describe('Antigravity LLM adapter', () => {
     expect(encoded).not.toContain('access-secret')
     expect(encoded).toContain('functionDeclarations')
   })
+
+  it('exposes a host retry policy for mid-stream transient failures and classifies mid-stream truncated SSE frames as TRANSPORT', async () => {
+    const adapter = new AntigravityAdapter({
+      auth: { credential: vi.fn(async () => credential('access')) },
+      transport: {
+        request: vi.fn(async () => new Response(
+          'data: {"response":{"parts":[{"text":"thinking...","thought":true}]}}\n\n'
+          + 'data: {"response":{"parts":[{"functionCall":{"id":"call-1","name":"write","args":{"content":"truncated',
+        )),
+      },
+    })
+
+    const policy = adapter.providerRetryPolicy()
+    expect(policy).toMatchObject({
+      mode: 'normal',
+      maxRetries: 2,
+      retryableCodes: ['EMPTY_RESPONSE', 'TIMEOUT', 'TRANSPORT', 'UPSTREAM', 'PROTOCOL_DRIFT'],
+    })
+
+    const chunks = await collectThroughRuntime(adapter, options())
+    expect(chunks.some(chunk => chunk.type === 'reasoning-delta' && chunk.text === 'thinking...')).toBe(true)
+    expect(chunks.at(-1)).toMatchObject({
+      type: 'finish',
+      reason: { kind: 'error', failure: { code: 'TRANSPORT' } },
+    })
+  })
 })

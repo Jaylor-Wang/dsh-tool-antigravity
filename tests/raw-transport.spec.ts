@@ -1,4 +1,5 @@
 import { Buffer } from 'node:buffer'
+import { gzipSync } from 'node:zlib'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const socketState = vi.hoisted(() => ({
@@ -263,6 +264,33 @@ describe('fixed private raw transport', () => {
     await expect(readPrivateText(response)).rejects.toMatchObject({ code: 'protocol-drift' })
   })
 
+  it('maps prematurely terminated chunked and gzip streams to offline for retry recovery', async () => {
+    const compressed = gzipSync(Buffer.from('data: {"response":{"parts":[{"text":"partial"}]}}\n\n', 'utf8'))
+    // Truncate the last 6 bytes of the valid gzip payload to simulate a dropped connection at EOF
+    const truncatedGzip = compressed.subarray(0, compressed.byteLength - 6)
+    socketState.response = Buffer.concat([
+      Buffer.from(`HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: ${String(truncatedGzip.byteLength)}\r\n\r\n`, 'latin1'),
+      truncatedGzip,
+    ])
+    const gzipResp = await createPrivateTransport().request({
+      url: ANTIGRAVITY_GENERATE_ENDPOINT,
+      accessToken: 'access-secret',
+      body: '{}',
+    })
+    await expect(readPrivateText(gzipResp)).rejects.toMatchObject({ code: 'offline' })
+
+    // Chunked stream missing terminal 0\r\n\r\n chunk on socket EOF
+    socketState.response = Buffer.from(
+      'HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n',
+      'latin1',
+    )
+    const chunkedResp = await createPrivateTransport().request({
+      url: ANTIGRAVITY_GENERATE_ENDPOINT,
+      accessToken: 'access-secret',
+      body: '{}',
+    })
+    await expect(readPrivateText(chunkedResp)).rejects.toMatchObject({ code: 'offline' })
+  })
   it('does not count a large first body packet as response header bytes', async () => {
     const body = 'a'.repeat(70 * 1024)
     socketState.response = Buffer.from(

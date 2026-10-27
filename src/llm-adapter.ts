@@ -34,6 +34,7 @@ import type {
   LlmResolvedModelInfo,
   Message,
   ReplayEnvelope,
+  ResolvedRetryPolicy,
   StreamChunk,
   TokenUsage,
 } from '@deepseek-ai/dsh-llm'
@@ -171,10 +172,17 @@ export class AntigravityAdapter extends LlmAdapter {
     return { id: ANTIGRAVITY_PROVIDER, name: 'Google Antigravity' }
   }
 
-  override providerRetryPolicy(): ReturnType<typeof resolveRetryPolicy> {
-    // This adapter already retries transient network failures internally, so the
-    // runtime policy stays at zero to avoid dispatching one metered request twice.
-    return resolveRetryPolicy({ mode: 'normal', maxRetries: 0 }, 'google-antigravity')
+  override providerRetryPolicy(): ResolvedRetryPolicy {
+    // Pre-delta network failures and 429 account rotations are handled internally
+    // before any chunk is yielded. Host-level retry (dsh-llm-retry) recovers
+    // mid-stream timeouts, connection drops, and truncated SSE streams after
+    // reasoning or text chunks have already been emitted.
+    return resolveRetryPolicy({
+      mode: 'normal',
+      maxRetries: 2,
+      retryableCodes: ['EMPTY_RESPONSE', 'TIMEOUT', 'TRANSPORT', 'UPSTREAM', 'PROTOCOL_DRIFT'],
+      backoff: { initialDelayMs: 1000, maxDelayMs: 5000, jitterRatio: 0.1 },
+    }, 'google-antigravity')
   }
 
   /** Forget account-bound availability when Gate 0 or the credential is replaced. */
@@ -400,7 +408,15 @@ export class AntigravityAdapter extends LlmAdapter {
       maxFrameBytes: this.options.maxFrameBytes,
     })) {
       if (sse.data.trim() === '[DONE]') continue
-      const event = parseProviderEvent(sse.data)
+      let event: ProviderEvent
+      try {
+        event = parseProviderEvent(sse.data)
+      } catch (error) {
+        if (hasEmitted.value && error instanceof PrivateTransportError && error.code === 'invalid-response') {
+          throw new PrivateTransportError('offline', 'The private SSE response stream ended with a truncated frame')
+        }
+        throw error
+      }
       if (event.error !== undefined) {
         eventError = event.error
         if (event.error.status === 401 || isAuthenticationCode(event.error.code)) throw new PrivateTransportError('authentication', 'The private endpoint requires authentication', { status: event.error.status ?? 401 })
@@ -1768,7 +1784,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isRetryableNetworkError(error: unknown): boolean {
   if (!(error instanceof PrivateTransportError)) return false
-  return error.code === 'offline' || error.code === 'timeout' || error.code === 'upstream'
+  return error.code === 'offline' || error.code === 'timeout' || error.code === 'upstream' || error.code === 'protocol-drift'
 }
 
 async function waitRetryBackoff(delayMs: number, signal?: AbortSignal): Promise<void> {

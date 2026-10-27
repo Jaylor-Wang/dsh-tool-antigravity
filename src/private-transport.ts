@@ -8,12 +8,12 @@ export type { PrivateTransportErrorCode } from './private-transport-error.ts'
 export { setExplicitProxy, scopedHttpsFetch } from './raw-http.ts'
 
 export const DEFAULT_PRIVATE_RESPONSE_HEADER_TIMEOUT_MS = 180_000
-export const DEFAULT_PRIVATE_IDLE_TIMEOUT_MS = 120_000
+export const DEFAULT_PRIVATE_IDLE_TIMEOUT_MS = 240_000
 export const DEFAULT_PRIVATE_TOTAL_TIMEOUT_MS = 600_000
 export const DEFAULT_PRIVATE_RESPONSE_BYTES = 8 * 1024 * 1024
 export const DEFAULT_PRIVATE_REQUEST_BYTES = 16 * 1024 * 1024
 export const MAX_PRIVATE_REQUEST_BYTES = 64 * 1024 * 1024
-export const DEFAULT_PRIVATE_FRAME_BYTES = 512 * 1024
+export const DEFAULT_PRIVATE_FRAME_BYTES = 2 * 1024 * 1024
 
 export interface PrivateTransportRequest {
   readonly url: string
@@ -174,6 +174,7 @@ export async function* iteratePrivateSse(
     eventName = undefined
     frameBytes = 0
     sawSseFrame = true
+    plainText = ''
     return event === undefined ? { data } : { data, event }
   }
 
@@ -185,7 +186,7 @@ export async function* iteratePrivateSse(
       if (bytes > maxBytes) throw new PrivateTransportError('response-too-large', 'The private response exceeded the byte limit')
       let decoded: string
       try { decoded = decoder.decode(chunk.value, { stream: true }) } catch { throw new PrivateTransportError('invalid-response', 'The private response was not valid UTF-8') }
-      plainText += decoded
+      if (!sawSseFrame) plainText += decoded
       buffer += decoded
       for (;;) {
         const newline = buffer.indexOf('\n')
@@ -212,7 +213,7 @@ export async function* iteratePrivateSse(
     }
     let tail: string
     try { tail = decoder.decode() } catch { throw new PrivateTransportError('invalid-response', 'The private response was not valid UTF-8') }
-    plainText += tail
+    if (!sawSseFrame) plainText += tail
     buffer += tail
     if (buffer.length > 0) {
       frameBytes += utf8Bytes(buffer)

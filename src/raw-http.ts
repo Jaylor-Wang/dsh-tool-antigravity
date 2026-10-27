@@ -275,7 +275,12 @@ function buildResponseBody(
   if (head.gzip) {
     const gunzip = createGunzip()
     current = pipeStage(current, gunzip)
-    current = pipeStage(current, new PassThrough(), () => new PrivateTransportError('protocol-drift', 'The private gzip response was malformed'))
+    current = pipeStage(current, new PassThrough(), error => {
+      const zlibCode = (error as { code?: string }).code
+      return zlibCode === 'Z_BUF_ERROR'
+        ? new PrivateTransportError('offline', 'The private gzip response ended early')
+        : new PrivateTransportError('protocol-drift', 'The private gzip response was malformed')
+    })
   }
   const abort = (): void => {
     socket.on('error', () => {})
@@ -373,7 +378,7 @@ class ChunkedDecoder extends Transform {
   override _flush(callback: (error?: Error | null) => void): void {
     try {
       this.flushChunks()
-      callback(this.finished ? undefined : new PrivateTransportError('protocol-drift', 'The private chunked response ended early'))
+      callback(this.finished ? undefined : new PrivateTransportError('offline', 'The private chunked response ended early'))
     } catch (error) {
       callback(error instanceof Error ? error : new PrivateTransportError('protocol-drift', 'The private chunked response was malformed'))
     }
