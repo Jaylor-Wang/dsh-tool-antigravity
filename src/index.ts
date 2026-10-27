@@ -18,6 +18,7 @@ import {
 } from './loopback-rpc.ts'
 import { mountCapabilityLifecycle } from './capability-lifecycle.ts'
 import { applyProxySetting, getStoredProxy } from './proxy-config.ts'
+import { registerAntigravityPetBalance } from './pet-balance.ts'
 
 export const name = 'antigravity-auth'
 export const inject = ['llm', 'attachments']
@@ -101,8 +102,10 @@ export function apply(ctx: Context, config: AntigravityAuthConfig = {}): void {
     label: 'antigravity-auth: OAuth and LLM operations',
   })
   ctx.inject(['commands'], commandCtx => commandCtx.commands.register(createAntigravityAuthCommand(service, () => accountMode)))
+  registerAntigravityPetBalance(ctx, service)
 }
 
+export * from './pet-balance.ts'
 export * from './auth-service.ts'
 export * from './auth-store-pool.ts'
 export * from './rotation-policy.ts'
