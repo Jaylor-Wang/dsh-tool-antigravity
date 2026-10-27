@@ -174,9 +174,11 @@ function createPetGroupPage(
  * @param service Antigravity 认证服务
  */
 export function registerAntigravityPetBalance(ctx: Context, service: AntigravityAuthService): void {
+  type DefaultModelService = { currentSelection?: () => { model?: string } }
   const dynamicCtx = ctx as Context & {
     inject?: (deps: string[], cb: (injectedCtx: Record<string, unknown>) => (() => void) | void) => void
-    agentDefaultModel?: { currentSelection?: () => { model?: string } }
+    get?: (name: string) => unknown
+    agentDefaultModel?: DefaultModelService
   }
 
   dynamicCtx.inject?.(['petApi7340'], (petCtx) => {
@@ -214,25 +216,31 @@ export function registerAntigravityPetBalance(ctx: Context, service: Antigravity
 
         let currentModel = ''
         try {
-          currentModel = (dynamicCtx.agentDefaultModel?.currentSelection?.()?.model ?? '').toLowerCase()
+          const modelSvc = (
+            (petCtx as { get?: (name: string) => unknown }).get?.('agentDefaultModel')
+            ?? dynamicCtx.get?.('agentDefaultModel')
+            ?? dynamicCtx.agentDefaultModel
+          ) as DefaultModelService | undefined
+          currentModel = (modelSvc?.currentSelection?.()?.model ?? '').toLowerCase()
         } catch {
           // 读取模型异常不影响主链路
         }
 
+        const isGptModel = currentModel.includes('gpt') || currentModel.includes('openai')
         const isNonGemini =
+          isGptModel ||
           currentModel.includes('claude') ||
-          currentModel.includes('gpt') ||
-          currentModel.includes('openai') ||
           currentModel.includes('anthropic') ||
           currentModel.includes('3p')
+        const nonGeminiBadge = isGptModel ? 'GPT-OSS' : 'Claude'
 
         const groupEntries: Array<{ group: typeof groups[number]; badge: string }> = []
         if (isNonGemini) {
-          if (nonGeminiGroup) groupEntries.push({ group: nonGeminiGroup, badge: 'Claude' })
+          if (nonGeminiGroup) groupEntries.push({ group: nonGeminiGroup, badge: nonGeminiBadge })
           if (geminiGroup) groupEntries.push({ group: geminiGroup, badge: 'Gemini' })
         } else {
           if (geminiGroup) groupEntries.push({ group: geminiGroup, badge: 'Gemini' })
-          if (nonGeminiGroup) groupEntries.push({ group: nonGeminiGroup, badge: 'Claude' })
+          if (nonGeminiGroup) groupEntries.push({ group: nonGeminiGroup, badge: nonGeminiBadge })
         }
         for (const g of groups) {
           if (!groupEntries.some(e => e.group === g)) {

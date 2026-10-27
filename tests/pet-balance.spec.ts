@@ -118,6 +118,43 @@ describe('registerAntigravityPetBalance', () => {
     expect(page1Str).toContain('剩余 35%')
   })
 
+  it('reads agentDefaultModel via ctx.get and renders GPT-OSS badge for gpt models', async () => {
+    let registeredProvider: { id: string; fetch: (args: { provider: string }) => Promise<unknown> } | undefined
+
+    const mockCtx = {
+      inject: vi.fn((_deps: string[], cb: (ctx: Record<string, unknown>) => unknown) => {
+        cb({
+          petApi7340: {
+            balance: {
+              register: vi.fn((def) => {
+                registeredProvider = def
+                return () => {}
+              }),
+            },
+          },
+        })
+      }),
+      get: vi.fn((name: string) =>
+        name === 'agentDefaultModel'
+          ? { currentSelection: () => ({ model: 'antigravity-gpt-oss-120b-medium' }) }
+          : undefined,
+      ),
+    }
+
+    const mockService = {
+      usage: vi.fn(async () => MOCK_QUOTA),
+    } as unknown as AntigravityAuthService
+
+    registerAntigravityPetBalance(mockCtx as never, mockService)
+    const res = (await registeredProvider!.fetch({ provider: 'google-antigravity' })) as {
+      data: { views: unknown[]; percent: number }
+    }
+
+    const page1Str = JSON.stringify(res.data.views[0])
+    expect(page1Str).toContain('GPT-OSS')
+    expect(page1Str).toContain('点击切换至 Gemini 额度')
+  })
+
   it('throws friendly error on unauthenticated quota', async () => {
     let registeredProvider: { id: string; fetch: (args: { provider: string }) => Promise<unknown> } | undefined
 
