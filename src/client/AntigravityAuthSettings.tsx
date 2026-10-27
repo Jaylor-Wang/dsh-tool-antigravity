@@ -1,6 +1,6 @@
 /** Settings shell for value-safe Antigravity login status. */
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, useTransition } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
 import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { AntigravityAuthRpcClient } from '../rpc-contract.ts'
@@ -59,12 +59,6 @@ export function AntigravityAuthSettings({ rpc, t, subscribe, imageScope }: Antig
   const [proxySaving, setProxySaving] = useState(false)
   const [proxyMessage, setProxyMessage] = useState('')
   const [resetTick, setResetTick] = useState(0)
-  /**
-   * The account list refreshes after an operation without tearing down what is on screen.
-   * Marking the reload as a transition keeps the already-updated rows mounted while the
-   * authoritative status arrives, so switching an account does not flash the panel.
-   */
-  const [, startStatusTransition] = useTransition()
   const statusGeneration = useRef(0)
   const quotaGeneration = useRef(0)
   const unmountSignal = useUnmountSignal()
@@ -302,10 +296,10 @@ export function AntigravityAuthSettings({ rpc, t, subscribe, imageScope }: Antig
                 singleAccount={status.singleAccount}
                 t={t}
                 rpc={rpc}
-                onChanged={() => {
-                  // A low-priority refresh: the row already shows its new state, so the list
-                  // must not unmount or flash while the authoritative copy arrives.
-                  startStatusTransition(() => { void load(unmountSignal(), true) })
+                onChanged={async () => {
+                  const signal = unmountSignal()
+                  void loadQuota(true, signal)
+                  await load(signal, true)
                 }}
               />
             </>

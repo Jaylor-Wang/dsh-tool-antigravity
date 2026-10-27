@@ -41,6 +41,7 @@ export interface QuotaStatusView {
 
 export interface QuotaService {
   refresh(signal?: AbortSignal, force?: boolean): Promise<QuotaStatusView>
+  invalidate?(): void
   status(): QuotaStatusView
   dispose(): Promise<void>
 }
@@ -131,6 +132,7 @@ export function createQuotaService(options: QuotaServiceOptions): QuotaService {
   })
   let current: QuotaStatusView = { state: 'unauthenticated' }
   let checkedAt = 0
+  let generation = 0
   let inFlight: Promise<QuotaStatusView> | undefined
   let inFlightAbort: (() => void) | undefined
   const lifecycleController = new AbortController()
@@ -141,18 +143,43 @@ export function createQuotaService(options: QuotaServiceOptions): QuotaService {
       if (disposed) return current
       if (!force && checkedAt > 0 && now() - checkedAt < minInterval) return current
       if (inFlight !== undefined) return await waitForCaller(inFlight, signal)
-      const combined = mergeAbortSignals(undefined, lifecycleController.signal)
-      inFlightAbort = combined.dispose
-      inFlight = refreshQuota(options.auth, transport, combined.signal, now).then(value => {
-        current = value
-        checkedAt = now()
+      const requestGeneration = ++generation
+      const requestController = new AbortController()
+      const combined = mergeAbortSignals(requestController.signal, lifecycleController.signal)
+      inFlightAbort = () => {
+        requestController.abort()
+        combined.dispose()
+      }
+      const pending = refreshQuota(options.auth, transport, combined.signal, now).then(value => {
+        if (requestGeneration === generation) {
+          current = value
+          checkedAt = now()
+        }
         return value
       }).catch(error => {
-        current = mapQuotaError(error, now())
-        checkedAt = now()
-        return current
-      }).finally(() => { combined.dispose(); inFlightAbort = undefined; inFlight = undefined })
-      return await waitForCaller(inFlight, signal)
+        const mapped = mapQuotaError(error, now())
+        if (requestGeneration === generation) {
+          current = mapped
+          checkedAt = now()
+        }
+        return mapped
+      }).finally(() => {
+        combined.dispose()
+        if (requestGeneration === generation) {
+          inFlightAbort = undefined
+          inFlight = undefined
+        }
+      })
+      inFlight = pending
+      return await waitForCaller(pending, signal)
+    },
+    invalidate: () => {
+      generation += 1
+      checkedAt = 0
+      current = { state: 'unauthenticated' }
+      inFlightAbort?.()
+      inFlightAbort = undefined
+      inFlight = undefined
     },
     status: () => current,
     dispose: async () => {

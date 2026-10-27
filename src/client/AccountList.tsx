@@ -17,8 +17,8 @@ export interface AccountListProps {
   readonly singleAccount: boolean
   readonly t: Translate
   readonly rpc: AntigravityAuthSettingsProps['rpc']
-  /** Reload the status view after a successful operation. */
-  readonly onChanged: () => void
+  /** Reload the status view and quota after a successful operation. */
+  readonly onChanged: () => void | Promise<void>
 }
 
 /** Which account an operation is currently running against, if any. */
@@ -33,33 +33,34 @@ export function AccountList({ accounts, singleAccount, t, rpc, onChanged }: Acco
     if (rpc.selectAccount === undefined) return
     setPending({ id, kind: 'select' })
     setMessage('')
-    const result = await rpc.selectAccount(id)
-    if (result?.ok) {
-      // One state change, then the parent refreshes at low priority. Writing the message
-      // and clearing the marker separately would repaint the row once per write, which is
-      // what made the switch look like a flicker.
+    try {
+      const result = await rpc.selectAccount(id)
+      if (result?.ok) {
+        await onChanged()
+        return
+      }
+      setMessage(result?.error?.message ?? t('accountsUnknown'))
+    } finally {
       setPending(undefined)
-      onChanged()
-      return
     }
-    setPending(undefined)
-    setMessage(result?.error?.message ?? t('accountsUnknown'))
   }, [rpc, t, onChanged])
 
   const remove = useCallback(async (id: string) => {
     if (rpc.removeAccount === undefined) return
     setPending({ id, kind: 'remove' })
     setMessage('')
-    const result = await rpc.removeAccount(id)
-    if (result?.ok) {
-      setPending(undefined)
+    try {
+      const result = await rpc.removeAccount(id)
+      if (result?.ok) {
+        setConfirming(undefined)
+        await onChanged()
+        return
+      }
       setConfirming(undefined)
-      onChanged()
-      return
+      setMessage(result?.error?.message ?? t('accountsUnknown'))
+    } finally {
+      setPending(undefined)
     }
-    setPending(undefined)
-    setConfirming(undefined)
-    setMessage(result?.error?.message ?? t('accountsUnknown'))
   }, [rpc, t, onChanged])
 
   if (singleAccount) {

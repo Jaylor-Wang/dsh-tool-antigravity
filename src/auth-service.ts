@@ -281,6 +281,7 @@ export class AntigravityAuthService implements BootstrapStatusService {
       await pool.markCooldown(record.lineage, decision.cooldownMs, failure.family)
     }
     this.credentials.invalidateCache()
+    this.quota.invalidate?.()
     this.notifyStatus()
     // Report exhaustion explicitly so a caller can surface "every account is resting"
     // instead of retrying against a pool that cannot serve the request.
@@ -302,6 +303,7 @@ export class AntigravityAuthService implements BootstrapStatusService {
     // from a cooldown, because it has not proven it can serve a request yet.
     await pool.setActive(lineage)
     this.credentials.invalidateCache()
+    this.quota.invalidate?.()
     this.notifyStatus()
     return { state: 'selected' }
   }
@@ -321,6 +323,7 @@ export class AntigravityAuthService implements BootstrapStatusService {
     const removed = await pool.removeAccount(lineage)
     if (!removed) return { state: 'unknown-account' }
     this.credentials.invalidateCache()
+    this.quota.invalidate?.()
     this.notifyStatus()
     return { state: 'removed' }
   }
@@ -388,6 +391,7 @@ export class AntigravityAuthService implements BootstrapStatusService {
     await this.flow.cancel()
     try {
       const result = await this.credentials.logout()
+      this.quota.invalidate?.()
       await this.gates.clear()
       this.notifyStatus()
       return result
@@ -399,7 +403,10 @@ export class AntigravityAuthService implements BootstrapStatusService {
   async revoke(confirmed: boolean, signal?: AbortSignal): Promise<import('./credential-coordinator.ts').RevokeActionResult> {
     if (this.disposed) throw new OAuthFlowError('internal', 'The Antigravity login is unavailable')
     const result = await this.credentials.revoke(confirmed, signal)
-    if (result.state === 'revoked' || result.state === 'logged-out' || result.state === 'superseded') await this.gates.clear()
+    if (result.state === 'revoked' || result.state === 'logged-out' || result.state === 'superseded') {
+      this.quota.invalidate?.()
+      await this.gates.clear()
+    }
     this.notifyStatus()
     return result
   }
@@ -450,6 +457,7 @@ export class AntigravityAuthService implements BootstrapStatusService {
       expiresAt: token.expiresAt,
       projectId: project.projectId,
     }, committed)
+    this.quota.invalidate?.()
     // The browser redirect commits through the flow's loopback listener, which
     // never reaches the public completeCallback wrapper. Publish the committed
     // credential here so capability lifecycles register the LLM/search/image/

@@ -354,4 +354,52 @@ describe('Antigravity bootstrap settings', () => {
     unmount()
     expect(actionSignal?.aborted).toBe(true)
   })
+
+  it('automatically refreshes status and quota when switching active account', async () => {
+    let activeId = 'acc-1'
+    const rpc = rpcFixture({ phase: 'success', configured: true, projectAvailable: true }, true)
+    rpc.status = vi.fn(async () => ({
+      ok: true as const,
+      value: {
+        status: createStatusView(
+          true,
+          { phase: 'success', configured: true, projectAvailable: true },
+          { state: 'logged-in', configured: true },
+          { state: 'idle' },
+          undefined,
+          [
+            { id: 'acc-1', email: 'a***1@example.com', active: activeId === 'acc-1' },
+            { id: 'acc-2', email: 'b***2@example.com', active: activeId === 'acc-2' },
+          ],
+        ),
+      },
+    }))
+    rpc.selectAccount = vi.fn(async (id: string) => {
+      activeId = id
+      return { ok: true as const, value: { state: 'selected' as const } }
+    })
+    rpc.usage = vi.fn(async (_signal?: AbortSignal, force?: boolean) => ({
+      ok: true as const,
+      value: {
+        state: 'available' as const,
+        checkedAt: '2026-10-27T00:00:00.000Z',
+        groups: [{
+          group: 'gemini' as const,
+          modelCount: 1,
+          windows: [{ window: '5h' as const, remainingFraction: force ? 0.91 : 0.42, resetTime: '2026-10-27T05:00:00.000Z' }],
+        }],
+      },
+    }))
+
+    render(<AntigravityAuthSettings rpc={rpc} t={key => zh[key]} subscribe={() => () => {}} />)
+
+    const switchBtn = await screen.findByRole('button', { name: zh.accountsUse })
+    fireEvent.click(switchBtn)
+
+    await waitFor(() => {
+      expect(rpc.selectAccount).toHaveBeenCalledWith('acc-2')
+      expect(rpc.usage).toHaveBeenCalledWith(expect.any(AbortSignal), true)
+      expect(screen.getByText(/91%/)).toBeTruthy()
+    })
+  })
 })

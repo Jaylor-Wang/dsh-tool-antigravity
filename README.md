@@ -5,7 +5,7 @@ English | [中文](README.zh.md)
 [![npm version](https://img.shields.io/npm/v/dsh-tool-antigravity.svg?color=blue)](https://www.npmjs.com/package/dsh-tool-antigravity)
 [![license](https://img.shields.io/github/license/Jaylor-Wang/dsh-tool-antigravity.svg)](LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/Jaylor-Wang/dsh-tool-antigravity.svg)](https://github.com/Jaylor-Wang/dsh-tool-antigravity/releases)
-[![Tests](https://img.shields.io/badge/tests-38%20suites%20%7C%20415%20passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-39%20suites%20%7C%20422%20passed-brightgreen.svg)](tests/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Strict%20Types-blue.svg)](tsconfig.json)
 
 High-performance, streamlined Antigravity capability bundle plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH).
@@ -14,11 +14,12 @@ Provides private Google OAuth 2.0 PKCE authentication, multi-model LLM routing (
 
 ---
 
-## Highlights in v0.4.5 (Light Theme UI Contrast Hardening & Switch Alignment)
+## Highlights in v0.5.0
 
-- **Light Theme UI Contrast Hardening**: Resolves washed-out invisible controls in DSH light mode by binding the proxy input to `.agy-input` with `--dsw-alias-bg-module-platform`, `--dsw-alias-border-l3`, and `--dsw-alias-label-primary`, eliminating hardcoded white-on-white text and transparent borders.
-- **Switch Slider Contrast Alignment**: Replaces nonexistent `--dsw-alias-bg-layer-4` tokens with DSH standard switch tokens (`--dsw-alias-border-l4`, `--dsw-alias-border-l3`, `--dsw-alias-switch-thumb`, and `--dsw-alias-brand-primary`), rendering crisp, high-contrast toggle tracks and knobs across both light and dark themes.
-- **Retains v0.4.1 capabilities**: Provider tool-call ID recovery, resilient network retry (exponential backoff up to 3 times), and universal thought signature enforcement.
+- **Mid-Stream Host Retry Policy & Truncated Stream Recovery**: Exposes `providerRetryPolicy` (`maxRetries: 2`, `retryableCodes: ['EMPTY_RESPONSE', 'TIMEOUT', 'TRANSPORT', 'UPSTREAM', 'PROTOCOL_DRIFT']`) for host agent loops (`dsh-agent-loop` / `dsh-fast-loop`), and classifies mid-stream truncated Gzip (`Z_BUF_ERROR`), prematurely ended Chunked streams, and partial SSE JSON frames as retryable `offline` (`TRANSPORT`) errors.
+- **240s Stream Idle Timeout, 2MB Frame Limit & Zero-Overhead SSE**: Extends stream idle timeout from `120s` to `240s` and single-frame limit from `512KB` to `2MB` to accommodate Google's server-side buffering of large `functionCall` payloads (e.g., 40KB+ single-file generation), while eliminating redundant `plainText` accumulation once SSE framing is active.
+- **Auto-Refresh Status & Quota on Account Switch**: Clicking "Use this account" or removing an account in Web Settings now automatically invalidates Host quota cache, reloads account status without button flicker, and refreshes real-time 5h/weekly quota bars.
+- **`dsh-pet` Multi-Page Quota Bubble Integration**: Seamlessly registers a `shape: 'custom'` multi-page quota bubble (`Gemini` and `Claude` / `GPT-OSS`) when `dsh-pet` (`petApi7340`) is present, auto-prioritizing the active model family on page 1.
 ## Features
 
 ### 1. High-Performance Core Architecture

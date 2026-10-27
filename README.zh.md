@@ -5,7 +5,7 @@
 [![npm version](https://img.shields.io/npm/v/dsh-tool-antigravity.svg?color=blue)](https://www.npmjs.com/package/dsh-tool-antigravity)
 [![license](https://img.shields.io/github/license/Jaylor-Wang/dsh-tool-antigravity.svg)](LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/Jaylor-Wang/dsh-tool-antigravity.svg)](https://github.com/Jaylor-Wang/dsh-tool-antigravity/releases)
-[![Tests](https://img.shields.io/badge/tests-38%20suites%20%7C%20415%20passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-39%20suites%20%7C%20422%20passed-brightgreen.svg)](tests/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Strict%20Types-blue.svg)](tsconfig.json)
 
 为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) 打造的高性能 Antigravity 核心能力包插件。
@@ -14,11 +14,12 @@
 
 ---
 
-## v0.4.5 版本重要更新 (浅色主题高反差视觉加固与开关控件对齐)
+## v0.5.0 版本重要更新
 
-- **浅色主题输入控件高反差适配**：彻底重构代理输入框样式，迁移至 `.agy-input` 类并接入 `--dsw-alias-bg-module-platform`、`--dsw-alias-border-l3` 与 `--dsw-alias-label-primary`，解决浅色模式下白底白字、输入内容与外边框不可见的视觉隐形问题。
-- **开关控件（Switch）轨道与滑块主题对齐**：移除 DSH 中不存在的 `--dsw-alias-bg-layer-4`，对齐 DSH 原生开关设计规范，接入 `--dsw-alias-border-l4`、`--dsw-alias-border-l3`、`--dsw-alias-switch-thumb` 与 `--dsw-alias-brand-primary`，在深浅主题下均保持轮廓清晰、阴影立体的高反差视觉体验。
-- **完整保留 v0.4.1 核心能力**：跨轮次 Provider 工具调用 ID 冲突自愈、瞬态网络 3 次指数退避重试（对齐 `TRANSPORT` 契约）与全系非 Claude 模型思维链签名加固。
+- **流中段宿主重试策略与截断流精准自愈**：在 `providerRetryPolicy` 中开放 `maxRetries: 2`（覆盖 `EMPTY_RESPONSE` / `TIMEOUT` / `TRANSPORT` / `UPSTREAM` / `PROTOCOL_DRIFT`），并将中途断流的 Gzip（`Z_BUF_ERROR`）、Chunked 提前 EOF 与末尾半截 SSE JSON 帧统一归类为可重试的 `offline`（`TRANSPORT`），彻底解决模型吐出思考摘要后发生网络断流时的重试死锁。
+- **240 秒流空闲超时、2MB 单帧上限与零冗余 SSE 缓冲**：将流式空闲超时从 `120s` 提升至 `240s`、单帧体积上限从 `512KB` 提升至 `2MB`，充分容纳 Google 服务端整包缓冲生成 40KB+ 大文件 `functionCall` 的耗时；一旦确认标准 SSE 帧即停止冗余 `plainText` 拼接。
+- **切换账号自动刷新状态与实时配额**：在 Web 设置面板点击“使用此账号”或“移除账号”时，自动失效宿主旧账号配额缓存、无闪烁更新账号列表状态，并自动触发新账号 5h/周配额看板的实时刷新。
+- **原生集成 `dsh-pet` 桌宠多页配额气泡**：当 `dsh-pet`（`petApi7340`）在场时自动注册 `shape: 'custom'` 声明式双页配额气泡（`Gemini` 与 `Claude` / `GPT-OSS`），支持根据当前选中模型自动优先排在首页。
 ## 核心特性与架构设计
 
 ### 1. 高性能底层架构
