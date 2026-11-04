@@ -119,6 +119,105 @@ describe('LLM adapter hardening: Tool schemas', () => {
     expect(wire).toContain('"anyOf"')
     expect(wire).toContain('"nullable":true')
   })
+
+  it('flattens and merges anyOf/oneOf tool schemas for Claude VALIDATED mode without untyped union nodes', () => {
+    const tools: ToolSchema[] = [
+      {
+        name: 'generate_image',
+        description: 'Generate or edit bounded Antigravity images and return durable session image handles.',
+        parameters: {
+          type: 'object',
+          properties: {
+            prompt: { type: 'string', minLength: 1, maxLength: 16384 },
+            references: {
+              type: 'array',
+              maxItems: 5,
+              items: {
+                oneOf: [
+                  {
+                    type: 'object',
+                    properties: { kind: { const: 'session' }, handle: { type: 'string' } },
+                    required: ['kind', 'handle'],
+                    additionalProperties: false,
+                  },
+                  {
+                    type: 'object',
+                    properties: { kind: { const: 'workspace' }, path: { type: 'string' } },
+                    required: ['kind', 'path'],
+                    additionalProperties: false,
+                  },
+                ],
+              },
+            },
+          },
+          required: ['prompt'],
+          additionalProperties: false,
+        },
+      },
+      {
+        name: 'schedule_create',
+        description: 'Create a reminder.',
+        parameters: {
+          type: 'object',
+          properties: {
+            prompt: { type: 'string' },
+            at: {
+              anyOf: [
+                { type: 'string' },
+                {
+                  type: 'object',
+                  properties: { date: { type: 'string' }, time: { type: 'string' }, time_zone: { type: 'string' } },
+                  required: ['date', 'time', 'time_zone'],
+                },
+              ],
+              description: 'Absolute target.',
+            },
+            permission: {
+              anyOf: [
+                { type: 'string', enum: ['read-only', 'workspace-write', 'danger-full-access'] },
+                { type: 'string' },
+              ],
+              description: 'Permission preset; empty string clears.',
+            },
+          },
+          required: ['prompt'],
+        },
+      },
+    ]
+
+    const payload = buildAntigravityGeneratePayload({
+      provider: 'google-antigravity',
+      model: 'antigravity-claude-opus-5-5',
+      messages: [{ id: 'm1' as never, role: 'user', content: [{ type: 'text', text: 'hi' }], source: { kind: 'user' } }],
+      tools,
+    }, MOCK_CREDENTIAL)
+
+    const declarations = ((payload.request as { tools: Array<{ functionDeclarations: Array<Record<string, unknown>> }> }).tools)[0]?.functionDeclarations ?? []
+    const wire = JSON.stringify(declarations)
+    expect(wire).not.toContain('"anyOf"')
+    expect(wire).not.toContain('"oneOf"')
+
+    const genImage = declarations.find(d => d.name === 'generate_image')
+    expect(genImage?.description).toContain('references (ARRAY_OF_OBJECTS[kind: string REQUIRED, handle: string, path: string])')
+    const refItems = ((genImage?.parameters as Record<string, unknown>)?.properties as Record<string, Record<string, unknown>>)?.references?.items as Record<string, unknown>
+    expect(refItems).toEqual({
+      type: 'OBJECT',
+      properties: {
+        kind: { type: 'STRING', enum: ['session', 'workspace'] },
+        handle: { type: 'STRING' },
+        path: { type: 'STRING' },
+      },
+      required: ['kind'],
+    })
+
+    const schedule = declarations.find(d => d.name === 'schedule_create')
+    const scheduleProps = (schedule?.parameters as Record<string, unknown>)?.properties as Record<string, Record<string, unknown>>
+    expect(scheduleProps?.at?.type).toBe('OBJECT')
+    expect(scheduleProps?.permission).toEqual({
+      type: 'STRING',
+      description: 'Permission preset; empty string clears. (Allowed presets: "read-only", "workspace-write", "danger-full-access")',
+    })
+  })
 })
 
 describe('LLM adapter hardening: Tool responses and deduplication', () => {
