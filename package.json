@@ -1,6 +1,6 @@
 {
   "name": "dsh-tool-antigravity",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "High-performance Antigravity capability bundle for DeepSeek Harness with smart multi-account quota rotation, multi-model routing, and Nano Banana 2 image generation",
   "type": "module",
   "engines": {

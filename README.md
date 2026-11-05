@@ -5,7 +5,7 @@ English | [中文](README.zh.md)
 [![npm version](https://img.shields.io/npm/v/dsh-tool-antigravity.svg?color=blue)](https://www.npmjs.com/package/dsh-tool-antigravity)
 [![license](https://img.shields.io/github/license/Jaylor-Wang/dsh-tool-antigravity.svg)](LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/Jaylor-Wang/dsh-tool-antigravity.svg)](https://github.com/Jaylor-Wang/dsh-tool-antigravity/releases)
-[![Tests](https://img.shields.io/badge/tests-39%20suites%20%7C%20422%20passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-39%20suites%20%7C%20425%20passed-brightgreen.svg)](tests/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Strict%20Types-blue.svg)](tsconfig.json)
 
 High-performance, streamlined Antigravity capability bundle plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH).
@@ -14,11 +14,12 @@ Provides private Google OAuth 2.0 PKCE authentication, smart multi-account pooli
 
 ---
 
-## Highlights in v0.5.2
+## Highlights in v0.5.3
 
-- **Core Engine & CLI Fingerprint Sync (`@cortexkit/antigravity-auth-core@3.0.14`)**: Upgraded to the latest upstream core engine and synced wire identity to `antigravity/cli/1.3.5`.
-- **New Generation Live Models Support**: Added full support for `antigravity-gemini-4-argon` (1M context / 65K output with 3-tier thinking), `antigravity-claude-opus-5-5` & `antigravity-claude-sonnet-5-5` (1M context / 128K output with adaptive thinking and VALIDATED tool calls). Retired models (`3.1-pro`, `3.6-flash`, `3.7-flash`, `4-6-thinking`) are cleanly refused locally with `INVALID_MODEL`.
-- **Fixed HTTP 400 Retry & Hardened Schema Sanitization (Issue #11)**: Removed `PROTOCOL_DRIFT` from `providerRetryPolicy` so HTTP 400 errors fail immediately without redundant retries; hardened `sanitizeSchema` with `oneOf -> anyOf`, nullable type array normalization, and strict `required` property checks for Gemini Protobuf compatibility.
+- **Normalize `anyOf` / `oneOf` Tool Schemas for Claude VALIDATED Mode (Fixes #12 / PR #13)**: Resolved HTTP 400 `PROTOCOL_DRIFT` error on `antigravity-claude-opus-5-5` and `antigravity-claude-sonnet-5-5` when tool definitions contain `anyOf` or `oneOf` unions (such as `generate_image.references.items`, DSH built-in `schedule_*`, `task_board_update`, or MCP tools).
+- **Claude Schema Normalization & Discriminated Union Merging**: Pre-merges multi-branch `object` unions into unified schemas preserving all branch properties and discriminant keys, merges open string presets, and pipelines schemas through `@cortexkit/antigravity-auth-core`'s `toGeminiSchema(..., { claudeValidated: true })`.
+- **Accurate Claude Tool Type Hints**: Lowercases type representations in `claudeToolTypeHint` so `STRICT PARAMETERS:` system instructions emit clean type hints (e.g. `ARRAY_OF_OBJECTS[kind: string REQUIRED, handle: string, path: string]`) without `ARRAY_OF_UNKNOWN`.
+
 ## Features
 
 ### 1. High-Performance Core Architecture

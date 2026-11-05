@@ -5,7 +5,7 @@
 [![npm version](https://img.shields.io/npm/v/dsh-tool-antigravity.svg?color=blue)](https://www.npmjs.com/package/dsh-tool-antigravity)
 [![license](https://img.shields.io/github/license/Jaylor-Wang/dsh-tool-antigravity.svg)](LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/Jaylor-Wang/dsh-tool-antigravity.svg)](https://github.com/Jaylor-Wang/dsh-tool-antigravity/releases)
-[![Tests](https://img.shields.io/badge/tests-39%20suites%20%7C%20422%20passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-39%20suites%20%7C%20425%20passed-brightgreen.svg)](tests/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Strict%20Types-blue.svg)](tsconfig.json)
 
 为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) 打造的高性能 Antigravity 核心能力包插件。
@@ -14,11 +14,12 @@
 
 ---
 
-## v0.5.2 版本重要更新
+## v0.5.3 版本重要更新
 
-- **同步上游官方内核与协议指纹 (`@cortexkit/antigravity-auth-core@3.0.14`)**：升级至最新上游内核，客户端协议指纹升级至 `antigravity/cli/1.3.5`。
-- **全系新一代在服模型支持 (`Gemini 4 Argon` 与 `Claude 5.5`)**：新增 `antigravity-gemini-4-argon`（1M 上下文 / 65K 输出 / 3 档自适应思考）及 `antigravity-claude-opus-5-5` / `antigravity-claude-sonnet-5-5`（1M 上下文 / 128K 输出 / 3 档自适应思考与 VALIDATED 工具调用）；已退役旧模型（`3.1-pro` / `3.6-flash` / `3.7-flash` / `4-6-thinking`）在本地直接拦截为 `INVALID_MODEL`，不再向远端发送无效请求。
-- **修复 HTTP 400 盲目重试与 Schema 清洗加固 (Issue #11)**：从 `providerRetryPolicy` 中移除 `PROTOCOL_DRIFT`，HTTP 400 请求被拒时单次即停；全面支持工具 Schema 的 `oneOf` -> `anyOf` 转换、可空类型数组 `type: ['string', 'null']` 及 `required` 严格校验，消除 Gemini Protobuf 解析异常。
+- **修复 Claude VALIDATED 模式下 `anyOf` / `oneOf` 工具 Schema 校验报错 (解决 #12 / PR #13)**：彻底解决 `antigravity-claude-opus-5-5` 与 `antigravity-claude-sonnet-5-5` 在挂载含 `anyOf` 或 `oneOf` 联合类型的工具（如本插件自带的 `generate_image` 引用项、DSH 内置的定时任务、任务看板及 MCP 工具等）时触发 HTTP 400 `PROTOCOL_DRIFT` 的问题。
+- **Claude 工具 Schema 归一化与对象联合无损合并**：引入 `cleanClaudeSchema` 预处理机制，在单一 Schema 下无损合并多分支 `object` 判别联合属性及可扩展字符串枚举预设，并接入 `@cortexkit/antigravity-auth-core` 的 `toGeminiSchema(..., { claudeValidated: true })` 展平剩余异构联合。
+- **加固 Claude 工具参数类型提示**：标准化 `claudeToolTypeHint` 大小写转换，确保 `STRICT PARAMETERS:` 系统提示词中准确输出参数结构（如 `ARRAY_OF_OBJECTS[kind: string REQUIRED, handle: string, path: string]`），杜绝出现 `ARRAY_OF_UNKNOWN`。
+
 ## 核心特性与架构设计
 
 ### 1. 高性能底层架构
