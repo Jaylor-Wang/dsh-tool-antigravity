@@ -17,6 +17,7 @@ import {
   isGeminiArgonModel,
   orderAgyRequestPayloadInPlace,
   resolveModelWithTier,
+  toGeminiSchema,
 } from '@cortexkit/antigravity-auth-core'
 import * as dshLlm from '@deepseek-ai/dsh-llm'
 import {
@@ -1087,7 +1088,7 @@ function buildPayloadFromContents(
       model: wireModel,
       ...(resolved.thinkingBudget === undefined || usesAdaptiveNativeThinking ? {} : { tierThinkingBudget: resolved.thinkingBudget }),
       ...(usesAdaptiveNativeThinking || (options.reasoningEffort === undefined && resolved.thinkingBudget === undefined) ? {} : { normalizedThinking: { includeThoughts: true, ...(resolved.thinkingBudget === undefined ? {} : { thinkingBudget: resolved.thinkingBudget }) } }),
-      cleanJSONSchema: value => isRecord(value) ? value : { type: 'object', properties: {} },
+      cleanJSONSchema: cleanClaudeSchema,
     })
     if (usesAdaptiveNativeThinking) {
       const transformedConfig = isRecord(request.generationConfig) ? request.generationConfig : {}
@@ -1136,11 +1137,87 @@ function applyClaudeToolHardening(request: Record<string, unknown>): void {
   }
 }
 
+function prepareClaudeSchema(value: unknown): unknown {
+  if (!isRecord(value)) return value
+  const copy: Record<string, unknown> = { ...value }
+  if (isRecord(copy.properties)) {
+    const props: Record<string, unknown> = {}
+    for (const [key, item] of Object.entries(copy.properties)) {
+      props[key] = prepareClaudeSchema(item)
+    }
+    copy.properties = props
+  }
+  if (copy.items !== undefined) {
+    copy.items = prepareClaudeSchema(copy.items)
+  }
+  const unionKey = Array.isArray(copy.anyOf) ? 'anyOf' : Array.isArray(copy.oneOf) ? 'oneOf' : undefined
+  if (unionKey !== undefined) {
+    const rawBranches = (copy[unionKey] as unknown[]).map(branch => prepareClaudeSchema(branch))
+    const branches = rawBranches.filter(isRecord)
+    const { anyOf: _anyOf, oneOf: _oneOf, ...base } = copy
+    if (
+      branches.length > 1
+      && branches.every(branch => typeof branch.type === 'string' && branch.type.toLowerCase() === 'object')
+    ) {
+      const mergedProps: Record<string, unknown> = {}
+      for (const branch of branches) {
+        if (!isRecord(branch.properties)) continue
+        for (const [key, prop] of Object.entries(branch.properties)) {
+          const existing = mergedProps[key]
+          if (existing === undefined) {
+            mergedProps[key] = prop
+          } else if (isRecord(existing) && isRecord(prop) && Array.isArray(existing.enum) && Array.isArray(prop.enum)) {
+            mergedProps[key] = {
+              ...existing,
+              enum: [...new Set([...existing.enum, ...prop.enum])],
+            }
+          }
+        }
+      }
+      const reqSets = branches.map(branch => new Set(
+        Array.isArray(branch.required) ? branch.required.filter((item): item is string => typeof item === 'string') : [],
+      ))
+      const commonRequired = [...(reqSets[0] ?? [])].filter(
+        req => reqSets.every(set => set.has(req)) && Object.prototype.hasOwnProperty.call(mergedProps, req),
+      )
+      return {
+        ...base,
+        type: 'object',
+        properties: mergedProps,
+        ...(commonRequired.length > 0 ? { required: commonRequired } : {}),
+      }
+    }
+    if (
+      branches.length > 1
+      && branches.every(branch => typeof branch.type === 'string' && branch.type.toLowerCase() === 'string' && !branch.properties && !branch.items)
+      && branches.some(branch => !Array.isArray(branch.enum))
+      && branches.some(branch => Array.isArray(branch.enum) && branch.enum.length > 0)
+    ) {
+      const enums = [...new Set(branches.flatMap(branch => Array.isArray(branch.enum) ? branch.enum.filter((item): item is string => typeof item === 'string') : []))]
+      const hint = `Allowed presets: ${enums.map(item => JSON.stringify(item)).join(', ')}`
+      const baseDesc = typeof base.description === 'string' ? base.description : ''
+      return {
+        ...base,
+        type: 'string',
+        description: baseDesc ? `${baseDesc} (${hint})` : hint,
+      }
+    }
+    copy[unionKey] = rawBranches
+  }
+  return copy
+}
+
+function cleanClaudeSchema(value: unknown): Record<string, unknown> {
+  const prepared = prepareClaudeSchema(value)
+  const cleaned = toGeminiSchema(prepared, { claudeValidated: true })
+  return isRecord(cleaned) ? cleaned : { type: 'object', properties: {} }
+}
+
 function hardenClaudeToolDeclaration(value: unknown): unknown {
   if (!isRecord(value)) return value
   const description = typeof value.description === 'string' ? value.description : ''
   if (description.includes('STRICT PARAMETERS:')) return value
-  const schema = isRecord(value.parameters) ? value.parameters : undefined
+  const schema = isRecord(value.parameters) ? cleanClaudeSchema(value.parameters) : undefined
   const properties = schema !== undefined && isRecord(schema.properties) ? schema.properties : undefined
   if (properties === undefined || Object.keys(properties).length === 0) return value
   const required = new Set(Array.isArray(schema?.required) ? schema.required.filter(item => typeof item === 'string') : [])
@@ -1161,15 +1238,15 @@ function claudeToolTypeHint(value: unknown): string {
       ? `string ENUM[${value.enum.map(item => JSON.stringify(item)).join(', ')}]`
       : `string ENUM[${value.enum.length} options]`
   }
-  const type = typeof value.type === 'string' ? value.type : 'unknown'
+  const type = typeof value.type === 'string' ? value.type.toLowerCase() : 'unknown'
   if (type === 'array') {
     if (!isRecord(value.items)) return 'ARRAY'
-    const itemType = typeof value.items.type === 'string' ? value.items.type : 'unknown'
+    const itemType = typeof value.items.type === 'string' ? value.items.type.toLowerCase() : 'unknown'
     if (itemType !== 'object') return `ARRAY_OF_${itemType.toUpperCase()}`
     if (!isRecord(value.items.properties)) return 'ARRAY_OF_OBJECTS'
     const nestedRequired = new Set(Array.isArray(value.items.required) ? value.items.required.filter(item => typeof item === 'string') : [])
     const nested = Object.entries(value.items.properties).map(([name, property]) => {
-      const nestedType = isRecord(property) && typeof property.type === 'string' ? property.type : 'unknown'
+      const nestedType = isRecord(property) && typeof property.type === 'string' ? property.type.toLowerCase() : 'unknown'
       return `${name}: ${nestedType}${nestedRequired.has(name) ? ' REQUIRED' : ''}`
     })
     return `ARRAY_OF_OBJECTS[${nested.join(', ')}]`
@@ -1177,7 +1254,7 @@ function claudeToolTypeHint(value: unknown): string {
   if (type === 'object' && isRecord(value.properties)) {
     const nestedRequired = new Set(Array.isArray(value.required) ? value.required.filter(item => typeof item === 'string') : [])
     const nested = Object.entries(value.properties).map(([name, property]) => {
-      const nestedType = isRecord(property) && typeof property.type === 'string' ? property.type : 'unknown'
+      const nestedType = isRecord(property) && typeof property.type === 'string' ? property.type.toLowerCase() : 'unknown'
       return `${name}: ${nestedType}${nestedRequired.has(name) ? ' REQUIRED' : ''}`
     })
     return `object{${nested.join(', ')}}`
