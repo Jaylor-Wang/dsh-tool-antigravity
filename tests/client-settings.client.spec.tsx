@@ -421,8 +421,8 @@ describe('Antigravity bootstrap settings', () => {
           revoke: { state: 'idle' as const },
           accounts: [],
           capabilities: [
-            { id: 'auth-llm' as const, state: 'available' as const },
-            { id: 'image' as const, state: 'available' as const },
+            { id: 'auth-llm' as const, state: 'available' as const, reasonCode: 'capability-ready' as const },
+            { id: 'image' as const, state: 'available' as const, reasonCode: 'capability-ready' as const },
           ],
         },
       },

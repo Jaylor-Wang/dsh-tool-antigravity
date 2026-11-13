@@ -1528,7 +1528,7 @@ describe('Antigravity LLM adapter', () => {
     const transportCalls: Array<{ url: string; body: Record<string, unknown> }> = []
     const transport = {
       request: vi.fn(async ({ url, body }: PrivateTransportRequest) => {
-        transportCalls.push({ url, body: JSON.parse(body ?? '{}') as Record<string, unknown> })
+        transportCalls.push({ url, body: JSON.parse(typeof body === 'string' ? body : '{}') as Record<string, unknown> })
         if (url.endsWith(':fetchAvailableModels')) {
           return new Response(JSON.stringify({
             models: {
