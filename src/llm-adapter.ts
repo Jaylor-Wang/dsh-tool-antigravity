@@ -155,6 +155,8 @@ export class AntigravityAdapter extends LlmAdapter {
   private catalogModelIds = new Set<string>()
   private catalogFailureCode: string | undefined
   private catalogView: AntigravityModelCatalogView
+  private readonly catalogByAccount = new Map<string, { expiresAt: number; modelIds: ReadonlySet<string>; failureCode?: string }>()
+  private readonly lastLiveByAccount = new Map<string, ReadonlySet<string>>()
 
   constructor(private readonly adapterOptions: AntigravityAdapterOptions) {
     super()
@@ -190,11 +192,16 @@ export class AntigravityAdapter extends LlmAdapter {
   }
 
   /** Forget account-bound availability when Gate 0 or the credential is replaced. */
-  invalidateModelCatalog(): void {
+  invalidateModelCatalog(accountKey?: string): void {
     this.catalogProjectId = undefined
     this.catalogExpiresAt = 0
     this.catalogModelIds = new Set<string>()
     this.catalogFailureCode = undefined
+    if (accountKey) {
+      this.catalogByAccount.delete(accountKey)
+    } else {
+      this.catalogByAccount.clear()
+    }
     this.catalogView = createCatalogView(this.definitions, 'snapshot')
   }
 
@@ -269,18 +276,24 @@ export class AntigravityAdapter extends LlmAdapter {
     if (options.provider !== ANTIGRAVITY_PROVIDER) {
       throw new LlmError('The Antigravity adapter received an unknown provider route', 'NO_ADAPTER')
     }
-    const signal = options.signal
-    const requestedDefinition = this.definitions[options.model]
+    let effectiveOptions = options
+    if (effectiveOptions.model === 'antigravity-gemini-3.5-flash') {
+      effectiveOptions = { ...options, model: 'antigravity-gemini-3.8-flash' }
+    }
+    const signal = effectiveOptions.signal
+    const requestedDefinition = this.definitions[effectiveOptions.model]
     if (requestedDefinition === undefined || requestedDefinition.modalities.output.includes('image')) throw new LlmError('The Antigravity model is not in the audited text model snapshot', 'INVALID_MODEL')
     if (isAborted(signal)) {
       yield finishChunk('aborted', 'CANCELLED')
       return
     }
-    const family = antigravityModelFamily(options.model)
+    const family = antigravityModelFamily(effectiveOptions.model)
     const hasEmitted = { value: false }
     let replayed = false
     let networkRetryCount = 0
     const MAX_NETWORK_RETRIES = 3
+    let rateLimitRetryCount = 0
+    const MAX_RATE_LIMIT_RETRIES = 1
     let rotationAttempts = 0
     const maxRotations = await this.rotationBudget()
     for (;;) {
@@ -288,11 +301,11 @@ export class AntigravityAdapter extends LlmAdapter {
       if (credential === undefined) {
         throw new LlmError('Antigravity login is required before model use', 'AUTH')
       }
-      const sessionKey = requestSessionKey(options)
+      const sessionKey = requestSessionKey(effectiveOptions)
       const requestScope = this.sessions.beginRequest(sessionKey)
       let payload: Record<string, unknown> & { sentImageBytes?: Map<string, number> }
       try {
-        payload = await buildAntigravityGeneratePayloadForAdapter(options, credential, requestScope.session, requestScope.timestamp, this.adapterOptions.attachments, this.adapterOptions.fs)
+        payload = await buildAntigravityGeneratePayloadForAdapter(effectiveOptions, credential, requestScope.session, requestScope.timestamp, this.adapterOptions.attachments, this.adapterOptions.fs)
       } catch (error) {
         if (error instanceof LlmError) throw error
         throw new LlmError('The Antigravity image input could not be admitted safely', 'UNSUPPORTED_MODALITY')
@@ -301,7 +314,7 @@ export class AntigravityAdapter extends LlmAdapter {
       delete payload.sentImageBytes
       const serialized = JSON.stringify(payload)
       /** Images alone exceed the private route's inline image budget: negotiate a logged offload. */
-      const imageOffload = antigravityImageOffloadCount(options.messages, sentImageBytes)
+      const imageOffload = antigravityImageOffloadCount(effectiveOptions.messages, sentImageBytes)
       if (imageOffload > 0) {
         throw new LlmError(
           `The Antigravity image payload exceeds the route image budget; offload ${String(imageOffload)} oldest retained image occurrence(s)`,
@@ -339,11 +352,23 @@ export class AntigravityAdapter extends LlmAdapter {
           replayed = true
           continue
         }
-        if (statusError.code === 'rate-limited' && !hasEmitted.value && !isAborted(signal) && rotationAttempts < maxRotations) {
+        if (statusError.code === 'rate-limited' && !hasEmitted.value && !isAborted(signal)) {
           await cancelResponse(response)
-          const rotated = await this.tryRotate(family, response.status, 'rate-limited')
-          if (rotated) {
-            rotationAttempts += 1
+          if (rotationAttempts < maxRotations) {
+            const rotated = await this.tryRotate(family, response.status, 'rate-limited')
+            if (rotated) {
+              rotationAttempts += 1
+              continue
+            }
+          }
+          if (rateLimitRetryCount < MAX_RATE_LIMIT_RETRIES && (effectiveOptions.reasoningEffort === 'high' || effectiveOptions.reasoningEffort === 'medium')) {
+            rateLimitRetryCount += 1
+            if (effectiveOptions.reasoningEffort === 'high') {
+              effectiveOptions = { ...effectiveOptions, reasoningEffort: 'medium' }
+            } else if (effectiveOptions.reasoningEffort === 'medium') {
+              effectiveOptions = { ...effectiveOptions, reasoningEffort: 'low' }
+            }
+            await waitRetryBackoff(1500, signal)
             continue
           }
         }
@@ -367,7 +392,7 @@ export class AntigravityAdapter extends LlmAdapter {
         throw toLlmError(statusError)
       }
       try {
-        yield* this.streamResponse(response, options, hasEmitted)
+        yield* this.streamResponse(response, effectiveOptions, hasEmitted)
         this.sessions.completeExecution(sessionKey)
         return
       } catch (error) {
@@ -376,10 +401,22 @@ export class AntigravityAdapter extends LlmAdapter {
           replayed = true
           continue
         }
-        if (privateError?.code === 'rate-limited' && !hasEmitted.value && !isAborted(signal) && rotationAttempts < maxRotations) {
-          const rotated = await this.tryRotate(family, privateError.status ?? 429, 'rate-limited')
-          if (rotated) {
-            rotationAttempts += 1
+        if (privateError?.code === 'rate-limited' && !hasEmitted.value && !isAborted(signal)) {
+          if (rotationAttempts < maxRotations) {
+            const rotated = await this.tryRotate(family, privateError.status ?? 429, 'rate-limited')
+            if (rotated) {
+              rotationAttempts += 1
+              continue
+            }
+          }
+          if (rateLimitRetryCount < MAX_RATE_LIMIT_RETRIES && (effectiveOptions.reasoningEffort === 'high' || effectiveOptions.reasoningEffort === 'medium')) {
+            rateLimitRetryCount += 1
+            if (effectiveOptions.reasoningEffort === 'high') {
+              effectiveOptions = { ...effectiveOptions, reasoningEffort: 'medium' }
+            } else if (effectiveOptions.reasoningEffort === 'medium') {
+              effectiveOptions = { ...effectiveOptions, reasoningEffort: 'low' }
+            }
+            await waitRetryBackoff(1500, signal)
             continue
           }
         }
@@ -492,9 +529,15 @@ export class AntigravityAdapter extends LlmAdapter {
   ): Promise<ReadonlySet<string>> {
     const credential = await this.readCredential(signal, forceCredentialRefresh)
     if (credential === undefined) throw new LlmError('Antigravity login is required before model discovery', 'AUTH')
-    if (!bypassCache && this.catalogProjectId === credential.projectId && Date.now() < this.catalogExpiresAt) {
-      if (this.catalogFailureCode !== undefined) throw new LlmError('The Antigravity live model catalog refresh remains unavailable', this.catalogFailureCode)
-      return this.catalogModelIds
+    const accountKey = (credential as Record<string, unknown>).lineage as string
+      || (credential as Record<string, unknown>).email as string
+      || (credential as Record<string, unknown>).id as string
+      || credential.projectId
+      || 'default'
+    const cached = this.catalogByAccount.get(accountKey)
+    if (!bypassCache && cached !== undefined && Date.now() < cached.expiresAt) {
+      if (cached.failureCode !== undefined) throw new LlmError('The Antigravity live model catalog refresh remains unavailable', cached.failureCode)
+      return cached.modelIds
     }
     let response: Response
     const body = credential.projectId ? { project: credential.projectId } : {}
@@ -508,7 +551,7 @@ export class AntigravityAdapter extends LlmAdapter {
       })
     } catch (error) {
       const failure = toModelCatalogError(error, signal, 'provider')
-      this.rememberCatalogFailure(credential.projectId, failure)
+      this.rememberCatalogFailure(accountKey, failure)
       throw failure
     }
     if (response.status === 403 && credential.projectId) {
@@ -530,7 +573,7 @@ export class AntigravityAdapter extends LlmAdapter {
         const failure = toModelCatalogError(error, signal, 'provider')
         if (failure.code === 'CANCELLED' || failure.code === 'GATE_0_ATTRIBUTION') {
           await cancelResponse(response)
-          this.rememberCatalogFailure(credential.projectId, failure)
+          this.rememberCatalogFailure(accountKey, failure)
           throw failure
         }
         // Keep the original project-scoped 403 as the authoritative failure.
@@ -540,11 +583,12 @@ export class AntigravityAdapter extends LlmAdapter {
     if (statusError !== undefined) {
       await cancelResponse(response)
       if (statusError.code === 'authentication' && !forceCredentialRefresh && !isAborted(signal)) {
+        this.catalogByAccount.delete(accountKey)
         this.catalogExpiresAt = 0
         return this.readLiveModelIds(signal, true, true)
       }
       const failure = toLlmError(statusError)
-      this.rememberCatalogFailure(credential.projectId, failure)
+      this.rememberCatalogFailure(accountKey, failure)
       throw failure
     }
     let value: unknown
@@ -557,7 +601,7 @@ export class AntigravityAdapter extends LlmAdapter {
       })) as unknown
     } catch (error) {
       const failure = toModelCatalogError(error, signal, 'protocol')
-      this.rememberCatalogFailure(credential.projectId, failure)
+      this.rememberCatalogFailure(accountKey, failure)
       throw failure
     }
     let ids: Set<string>
@@ -565,22 +609,33 @@ export class AntigravityAdapter extends LlmAdapter {
       const failure = error instanceof LlmError
         ? error
         : new LlmError('The Antigravity live model catalog did not match the audited schema', 'PROTOCOL_DRIFT')
-      this.rememberCatalogFailure(credential.projectId, failure)
+      this.rememberCatalogFailure(accountKey, failure)
       throw failure
     }
     this.catalogProjectId = credential.projectId
     this.catalogModelIds = ids
     this.catalogFailureCode = undefined
     this.catalogExpiresAt = Date.now() + MODEL_CATALOG_TTL_MS
+    this.catalogByAccount.set(accountKey, {
+      modelIds: ids,
+      expiresAt: Date.now() + MODEL_CATALOG_TTL_MS,
+      failureCode: undefined,
+    })
+    this.lastLiveByAccount.set(accountKey, ids)
     return ids
   }
 
-  private rememberCatalogFailure(projectId: string, failure: LlmError): void {
+  private rememberCatalogFailure(accountKey: string, failure: LlmError): void {
     if (failure.code === 'AUTH' || failure.code === 'CANCELLED') return
-    this.catalogProjectId = projectId
+    this.catalogProjectId = typeof accountKey === 'string' ? accountKey : undefined
     this.catalogModelIds = new Set<string>()
     this.catalogFailureCode = failure.code
     this.catalogExpiresAt = Date.now() + MODEL_CATALOG_TTL_MS
+    this.catalogByAccount.set(accountKey, {
+      modelIds: new Set<string>(),
+      failureCode: failure.code,
+      expiresAt: Date.now() + MODEL_CATALOG_TTL_MS,
+    })
   }
 
   private async readCredential(signal: AbortSignal | undefined, forceRefresh: boolean, family?: string): Promise<HostCredential | undefined> {

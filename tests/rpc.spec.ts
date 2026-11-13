@@ -241,6 +241,15 @@ describe('Antigravity login RPC', () => {
       groups: [{ group: 'gemini', modelCount: 2, windows: [{ window: '5h', remainingFraction: 0.5, resetTime: '2030-01-02T00:00:00.000Z' }] }],
     }
     expect(parseUsageResult(valid)).toEqual(valid)
+    const validWithArgon = {
+      state: 'available',
+      checkedAt: '2030-01-01T00:00:00.000Z',
+      groups: [
+        { group: 'gemini', modelCount: 2, windows: [{ window: '5h', remainingFraction: 0.5, resetTime: '2030-01-02T00:00:00.000Z' }] },
+        { group: 'gemini-4', modelCount: 1, windows: [{ window: '5h', remainingFraction: 0.8, resetTime: '2030-01-02T00:00:00.000Z' }] },
+      ],
+    }
+    expect(parseUsageResult(validWithArgon)).toEqual(validWithArgon)
     expect(parseUsageResult({ ...valid, leaked: 'value' })).toBeUndefined()
     expect(parseUsageResult({ state: 'available' })).toBeUndefined()
     expect(parseUsageResult({ state: 'available', groups: [{ group: 'gemini', modelCount: 2, windows: [{ window: '5h', remainingFraction: 2, resetTime: '2030-01-02T00:00:00.000Z' }] }] })).toBeUndefined()

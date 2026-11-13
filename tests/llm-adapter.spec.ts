@@ -1344,4 +1344,74 @@ describe('Antigravity LLM adapter', () => {
       },
     })
   })
+
+  it('transparently redirects deprecated antigravity-gemini-3.5-flash to antigravity-gemini-3.8-flash during stream', async () => {
+    let capturedBody: string | undefined
+    const transport = {
+      request: vi.fn(async (input: { body?: string }) => {
+        capturedBody = input.body
+        return new Response('data: {"response":{"parts":[{"text":"hello"}],"finishReason":"STOP"}}\n\n')
+      }),
+    }
+    const adapter = new AntigravityAdapter({
+      auth: { credential: vi.fn(async () => credential('access')) },
+      transport,
+    })
+
+    const chunks = []
+    for await (const chunk of adapter.stream(options({ model: 'antigravity-gemini-3.5-flash' }))) {
+      chunks.push(chunk)
+    }
+
+    expect(chunks.some(c => c.type === 'text-delta' && c.text === 'hello')).toBe(true)
+    expect(capturedBody).toBeDefined()
+    const parsed = JSON.parse(capturedBody!)
+    expect(parsed.model).toMatch(/^gemini-3\.8-flash/u)
+  })
+
+  it('isolates live model discovery cache per account and supports selective invalidation', async () => {
+    let requestCount = 0
+    const transport = {
+      request: vi.fn(async () => {
+        requestCount += 1
+        return liveCatalog()
+      }),
+    }
+    let currentAccount = 'account-a'
+    const adapter = new AntigravityAdapter({
+      auth: {
+        credential: vi.fn(async () => ({
+          ...credential('access'),
+          email: `${currentAccount}@example.com`,
+          lineage: currentAccount,
+        })),
+      },
+      transport,
+    })
+
+    // First call for account-a fetches live
+    await adapter.listModels(ANTIGRAVITY_PROVIDER)
+    expect(requestCount).toBe(1)
+
+    // Second call for account-a uses cached result
+    await adapter.listModels(ANTIGRAVITY_PROVIDER)
+    expect(requestCount).toBe(1)
+
+    // Switch to account-b
+    currentAccount = 'account-b'
+    await adapter.listModels(ANTIGRAVITY_PROVIDER)
+    expect(requestCount).toBe(2)
+
+    // Selectively invalidate account-a only
+    adapter.invalidateModelCatalog('account-a')
+
+    // account-b should still hit cache
+    await adapter.listModels(ANTIGRAVITY_PROVIDER)
+    expect(requestCount).toBe(2)
+
+    // account-a should re-fetch
+    currentAccount = 'account-a'
+    await adapter.listModels(ANTIGRAVITY_PROVIDER)
+    expect(requestCount).toBe(3)
+  })
 })
