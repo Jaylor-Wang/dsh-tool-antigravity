@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import type { ReactNode } from 'react'
 import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { AntigravityAuthRpcClient } from '../rpc-contract.ts'
+import type { AntigravityModelAvailability, AntigravityModelCatalogView } from '../model-catalog.ts'
 import type { QuotaStatusView } from '../quota.ts'
 import type { AntigravityImageSettings } from '../image.ts'
 import type { RevokeState } from '../credential-coordinator.ts'
@@ -51,6 +52,9 @@ export function AntigravityAuthSettings({ rpc, t, subscribe, imageScope }: Antig
   const [quota, setQuota] = useState<QuotaStatusView | null>(null)
   const [quotaBusy, setQuotaBusy] = useState(false)
   const [quotaError, setQuotaError] = useState<string | null>(null)
+  const [catalog, setCatalog] = useState<AntigravityModelCatalogView | null>(null)
+  const [modelsBusy, setModelsBusy] = useState(false)
+  const [modelsError, setModelsError] = useState<string | null>(null)
   const [loadState, setLoadState] = useState<LoadState>('loading')
   const [_error, setError] = useState<string | null>(null)
   const [loginBusy, setLoginBusy] = useState(false)
@@ -61,6 +65,7 @@ export function AntigravityAuthSettings({ rpc, t, subscribe, imageScope }: Antig
   const [resetTick, setResetTick] = useState(0)
   const statusGeneration = useRef(0)
   const quotaGeneration = useRef(0)
+  const modelsGeneration = useRef(0)
   const unmountSignal = useUnmountSignal()
 
   useEffect(() => {
@@ -150,6 +155,37 @@ export function AntigravityAuthSettings({ rpc, t, subscribe, imageScope }: Antig
     void loadQuota(false, controller.signal)
     return () => controller.abort()
   }, [loadQuota, rpc.usage, status?.login.projectAvailable, resetTick])
+
+  const loadModels = useCallback(async (force = false, signal?: AbortSignal) => {
+    if (rpc.models === undefined) return
+    const generation = ++modelsGeneration.current
+    setModelsBusy(true)
+    setModelsError(null)
+    try {
+      const result = await rpc.models(signal, force)
+      if (signal?.aborted === true || generation !== modelsGeneration.current) return
+      if (!result.ok) {
+        setModelsError(result.error.message || t('modelsFailed'))
+        return
+      }
+      setCatalog(result.value)
+    } catch (cause) {
+      if (signal?.aborted === true || generation !== modelsGeneration.current) return
+      setModelsError(messageOf(cause, t('modelsFailed')))
+    } finally {
+      if (signal?.aborted !== true && generation === modelsGeneration.current) setModelsBusy(false)
+    }
+  }, [rpc, t])
+
+  useEffect(() => {
+    if (rpc.models === undefined) {
+      setCatalog(null)
+      return
+    }
+    const controller = new AbortController()
+    void loadModels(false, controller.signal)
+    return () => controller.abort()
+  }, [loadModels, rpc.models, status?.login.projectAvailable, resetTick])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -299,6 +335,7 @@ export function AntigravityAuthSettings({ rpc, t, subscribe, imageScope }: Antig
                 onChanged={async () => {
                   const signal = unmountSignal()
                   void loadQuota(true, signal)
+                  void loadModels(true, signal)
                   await load(signal, true)
                 }}
               />
@@ -340,7 +377,7 @@ export function AntigravityAuthSettings({ rpc, t, subscribe, imageScope }: Antig
               disabled={loadState === 'loading' || quotaBusy}
               onClick={() => {
                 const minDelay = new Promise(resolve => setTimeout(resolve, 500))
-                void Promise.all([load(unmountSignal()), loadQuota(true, unmountSignal()), minDelay])
+                void Promise.all([load(unmountSignal()), loadQuota(true, unmountSignal()), loadModels(true, unmountSignal()), minDelay])
               }}
             >
               <span className={quotaBusy || loadState === 'loading' ? 'agy-spin-icon' : ''}>
@@ -363,7 +400,17 @@ export function AntigravityAuthSettings({ rpc, t, subscribe, imageScope }: Antig
           )}
         </article>
 
-        {/* Card 2: Network Proxy */}
+        {/* Card 2: Available Models */}
+        <ModelsCard
+          catalog={catalog}
+          busy={modelsBusy}
+          error={modelsError}
+          projectAvailable={status?.login.projectAvailable === true}
+          t={t}
+          onRefresh={() => { void loadModels(true, unmountSignal()) }}
+        />
+
+        {/* Card 3: Network Proxy */}
         <article className="agy-card">
           <div className="agy-card-header">
             <div className="agy-card-identity">
@@ -581,4 +628,98 @@ function revokeStatusText(state: RevokeState, t: AntigravityAuthSettingsProps['t
 
 function messageOf(_error: unknown, fallback: string): string {
   return fallback
+}
+
+function modelsSummaryText(catalog: AntigravityModelCatalogView | null, t: AntigravityAuthSettingsProps['t']): string {
+  if (catalog === null) return t('modelsLoading')
+  if (catalog.state === 'live-available') return t('modelsLiveAvailable')
+  if (catalog.state === 'refresh-failed') return catalog.cached ? t('modelsCachedFallback') : t('modelsRefreshFailed')
+  if (catalog.state === 'protocol-drift') return t('modelsProtocolDrift')
+  return t('modelsSnapshot')
+}
+
+function modelEntryBadge(
+  entryState: AntigravityModelAvailability,
+  cached: boolean | undefined,
+  t: AntigravityAuthSettingsProps['t'],
+): { readonly className: string; readonly label: string } {
+  if (entryState === 'live-available') {
+    return { className: 'agy-badge agy-badge-available', label: t('modelsAvailableEntry') }
+  }
+  if (entryState === 'unavailable') {
+    return { className: 'agy-badge agy-badge-disabled', label: t('modelsUnavailableEntry') }
+  }
+  return {
+    className: 'agy-badge agy-badge-warning',
+    label: cached ? t('modelsCachedEntry') : t('modelsSnapshotEntry'),
+  }
+}
+
+function ModelsCard({
+  catalog,
+  busy,
+  error,
+  projectAvailable,
+  t,
+  onRefresh,
+}: {
+  catalog: AntigravityModelCatalogView | null
+  busy: boolean
+  error: string | null
+  projectAvailable: boolean
+  t: AntigravityAuthSettingsProps['t']
+  onRefresh: () => void
+}): ReactNode {
+  const warningText = error !== null
+    ? `${error} ${t('modelsMayBeStale')}`
+    : catalog?.state === 'refresh-failed' || catalog?.state === 'protocol-drift' || (projectAvailable && catalog?.state === 'snapshot')
+      ? modelsSummaryText(catalog, t)
+      : undefined
+
+  return (
+    <article className="agy-card" aria-labelledby="antigravity-models-card-title">
+      <div className="agy-card-header">
+        <div className="agy-card-identity">
+          <h2 className="agy-card-title" id="antigravity-models-card-title">{t('modelsTitle')}</h2>
+          <p className="agy-card-intro">{modelsSummaryText(catalog, t)}</p>
+        </div>
+        <div className="agy-card-action">
+          <button
+            className="agy-btn agy-btn-outline"
+            type="button"
+            disabled={busy}
+            onClick={onRefresh}
+          >
+            {busy ? t('modelsLoading') : t('modelsRefresh')}
+          </button>
+        </div>
+      </div>
+
+      {warningText === undefined ? null : (
+        <p className="agy-alert agy-alert-warning" role="alert">
+          <span>{warningText}</span>
+        </p>
+      )}
+
+      {catalog === null ? null : (
+        <ul className="agy-item-list">
+          {catalog.models.map(model => {
+            const badge = modelEntryBadge(model.state, catalog.cached, t)
+            return (
+              <li key={model.id} className="agy-item-row">
+                <div className="agy-model-identity">
+                  <span className="agy-item-title">{model.name}</span>
+                  <span className="agy-model-id">{model.id}</span>
+                </div>
+                <span className={badge.className}>
+                  <span className="agy-badge-dot" aria-hidden="true" />
+                  <span>{badge.label}</span>
+                </span>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </article>
+  )
 }

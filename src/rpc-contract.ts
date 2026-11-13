@@ -132,12 +132,18 @@ function isSafeErrorDetails(value: unknown): boolean {
 /** Parse a closed, value-safe advisory model catalog received by the browser. */
 export function parseModelCatalogResult(value: unknown): AntigravityModelCatalogView | undefined {
   if (!isRecord(value)
-    || !hasExactKeys(value, ['state', 'models', ...(value.checkedAt === undefined ? [] : ['checkedAt'])])
+    || !hasExactKeys(value, [
+      'state',
+      'models',
+      ...(value.checkedAt === undefined ? [] : ['checkedAt']),
+      ...(value.cached === undefined ? [] : ['cached']),
+    ])
     || !ANTIGRAVITY_MODEL_CATALOG_STATES.includes(value.state as never)
     || !Array.isArray(value.models)
     || value.models.length === 0
     || value.models.length > 64
-    || (value.checkedAt !== undefined && !isIsoTime(value.checkedAt))) return undefined
+    || (value.checkedAt !== undefined && !isIsoTime(value.checkedAt))
+    || (value.cached !== undefined && typeof value.cached !== 'boolean')) return undefined
   const models: Array<{ id: string; name: string; state: AntigravityModelAvailability }> = []
   const ids = new Set<string>()
   for (const model of value.models) {
@@ -155,6 +161,7 @@ export function parseModelCatalogResult(value: unknown): AntigravityModelCatalog
     state: value.state as AntigravityModelCatalogView['state'],
     models,
     ...(typeof value.checkedAt === 'string' ? { checkedAt: value.checkedAt } : {}),
+    ...(typeof value.cached === 'boolean' ? { cached: value.cached } : {}),
   }
 }
 

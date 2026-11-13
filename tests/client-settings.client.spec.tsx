@@ -399,7 +399,83 @@ describe('Antigravity bootstrap settings', () => {
     await waitFor(() => {
       expect(rpc.selectAccount).toHaveBeenCalledWith('acc-2')
       expect(rpc.usage).toHaveBeenCalledWith(expect.any(AbortSignal), true)
+      expect(rpc.models).toHaveBeenCalledWith(expect.any(AbortSignal), true)
       expect(screen.getByText(/91%/)).toBeTruthy()
+    })
+  })
+
+  it('renders live model availability, supports manual refresh, and warns when falling back to cached/known lists', async () => {
+    const rpc = rpcFixture()
+    rpc.status = vi.fn(async () => ({
+      ok: true as const,
+      value: {
+        status: {
+          pluginId: 'dsh-tool-antigravity' as const,
+          phase: 'bootstrap' as const,
+          privateSelfUse: true as const,
+          singleAccount: true,
+          riskAcknowledgementRequired: true as const,
+          riskAcknowledged: true,
+          login: { phase: 'success' as const, configured: true, projectAvailable: true },
+          credential: { state: 'logged-in' as const, configured: true },
+          revoke: { state: 'idle' as const },
+          accounts: [],
+          capabilities: [
+            { id: 'auth-llm' as const, state: 'available' as const },
+            { id: 'image' as const, state: 'available' as const },
+          ],
+        },
+      },
+    }))
+    rpc.models = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true as const,
+        value: {
+          state: 'live-available' as const,
+          checkedAt: '2026-11-13T00:00:00.000Z',
+          models: [
+            { id: 'antigravity-gemini-4-hydrogen', name: 'Gemini 4 Hydrogen', state: 'live-available' as const },
+            { id: 'antigravity-gemini-4-carbon', name: 'Gemini 4 Carbon', state: 'unavailable' as const },
+          ],
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: true as const,
+        value: {
+          state: 'live-available' as const,
+          checkedAt: '2026-11-13T00:00:00.000Z',
+          models: [
+            { id: 'antigravity-gemini-4-hydrogen', name: 'Gemini 4 Hydrogen', state: 'live-available' as const },
+            { id: 'antigravity-gemini-4-carbon', name: 'Gemini 4 Carbon', state: 'unavailable' as const },
+          ],
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: true as const,
+        value: {
+          state: 'refresh-failed' as const,
+          cached: true,
+          checkedAt: '2026-11-13T00:00:00.000Z',
+          models: [
+            { id: 'antigravity-gemini-4-hydrogen', name: 'Gemini 4 Hydrogen', state: 'snapshot' as const },
+          ],
+        },
+      })
+
+    render(<AntigravityAuthSettings rpc={rpc} t={key => zh[key]} subscribe={() => () => {}} />)
+
+    expect(await screen.findByText('Gemini 4 Hydrogen')).toBeTruthy()
+    expect(screen.getByText(zh.modelsAvailableEntry)).toBeTruthy()
+    expect(screen.getByText(zh.modelsUnavailableEntry)).toBeTruthy()
+
+    const refreshBtn = screen.getByRole('button', { name: zh.modelsRefresh })
+    fireEvent.click(refreshBtn)
+
+    await waitFor(() => {
+      expect(rpc.models).toHaveBeenCalledWith(expect.any(AbortSignal), true)
+      const alert = screen.getByRole('alert')
+      expect(alert.textContent).toContain('列表可能不是最新')
+      expect(screen.getByText(zh.modelsCachedEntry)).toBeTruthy()
     })
   })
 })

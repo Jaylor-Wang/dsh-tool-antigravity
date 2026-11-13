@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import LlmRuntime, { CONTEXT_WINDOW_EXCEEDED_CODE, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, Message, StreamChunk } from '@deepseek-ai/dsh-llm'
@@ -1519,5 +1522,150 @@ describe('Antigravity LLM adapter', () => {
     })
     expect((await adapterWithEnabledCarbon.listModels(ANTIGRAVITY_PROVIDER)).map(model => model.id))
       .toEqual(['antigravity-gemini-4-carbon'])
+  })
+
+  it('discovers unseen server models, resolves their metadata, and streams them with server wire specs', async () => {
+    const transportCalls: Array<{ url: string; body: Record<string, unknown> }> = []
+    const transport = {
+      request: vi.fn(async ({ url, body }: PrivateTransportRequest) => {
+        transportCalls.push({ url, body: JSON.parse(body ?? '{}') as Record<string, unknown> })
+        if (url.endsWith(':fetchAvailableModels')) {
+          return new Response(JSON.stringify({
+            models: {
+              'gemini-4-neon-low': {
+                displayName: 'Gemini 4 Neon (Low)',
+                model: 'MODEL_PLACEHOLDER_M601',
+                maxTokens: 2_000_000,
+                maxOutputTokens: 131_072,
+                supportsImages: true,
+                supportsThinking: true,
+              },
+              'gemini-4-neon-xhigh': {
+                displayName: 'Gemini 4 Neon (XHigh)',
+                model: 'MODEL_PLACEHOLDER_M602',
+                maxTokens: 2_000_000,
+                maxOutputTokens: 131_072,
+                supportsImages: true,
+                supportsThinking: true,
+              },
+              tab_internal_autocomplete: {
+                displayName: 'Internal Tab',
+                isInternal: true,
+                model: 'MODEL_PLACEHOLDER_INTERNAL',
+              },
+            },
+          }))
+        }
+        return new Response('data: {"response":{"parts":[{"text":"neon-ok"}],"finishReason":"STOP"}}\n\ndata: [DONE]\n\n')
+      }),
+    }
+    const adapter = new AntigravityAdapter({
+      auth: { credential: vi.fn(async () => credential('access')) },
+      transport,
+    })
+
+    const listed = await adapter.listModels(ANTIGRAVITY_PROVIDER)
+    expect(listed.map(model => model.id)).toEqual(['antigravity-gemini-4-neon'])
+
+    const catalog = await adapter.modelCatalog(undefined, true)
+    expect(catalog.state).toBe('live-available')
+    expect(catalog.models.find(model => model.id === 'antigravity-gemini-4-neon')).toMatchObject({
+      name: 'Gemini 4 Neon',
+      state: 'live-available',
+    })
+
+    const resolved = await adapter.resolveModel(ANTIGRAVITY_PROVIDER, 'antigravity-gemini-4-neon')
+    expect(resolved).toMatchObject({
+      id: 'antigravity-gemini-4-neon',
+      name: 'Gemini 4 Neon',
+      context: { contextWindow: 2_000_000 },
+      defaultMaxTokens: 131_072,
+      reasoning: {
+        efforts: [
+          { id: ReasoningEffortId('low'), name: 'Low' },
+          { id: ReasoningEffortId('xhigh'), name: 'XHigh' },
+        ],
+      },
+    })
+
+    const chunks = await collectThroughRuntime(adapter, {
+      provider: ANTIGRAVITY_PROVIDER,
+      model: 'antigravity-gemini-4-neon',
+      messages: [message('hello')],
+      reasoningEffort: ReasoningEffortId('xhigh'),
+      signal: new AbortController().signal,
+    })
+    expect(chunks.some(chunk => chunk.type === 'text-delta' && chunk.text === 'neon-ok')).toBe(true)
+
+    const generateCall = transportCalls.find(call => !call.url.endsWith(':fetchAvailableModels'))
+    expect(generateCall?.body).toMatchObject({
+      model: 'gemini-4-neon-xhigh',
+      request: {
+        labels: { model_enum: 'MODEL_PLACEHOLDER_M602' },
+        generationConfig: {
+          maxOutputTokens: 131_072,
+          thinkingConfig: { includeThoughts: true, thinkingLevel: 'XHIGH' },
+        },
+      },
+    })
+  })
+
+  it('falls back to persisted cached live models across restarts when live refresh fails', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-antigravity-catalog-cache-'))
+    const cachePath = join(dir, 'model-catalog.json')
+    try {
+      const firstAdapter = new AntigravityAdapter({
+        auth: { credential: vi.fn(async () => credential('access')) },
+        catalogCachePath: cachePath,
+        transport: {
+          request: vi.fn(async () => new Response(JSON.stringify({
+            models: {
+              'gemini-4-hydrogen-high': { displayName: 'Gemini 4 Hydrogen (High)', maxTokens: 1_048_576, maxOutputTokens: 262_144 },
+              'gemini-4-carbon-disabled': { displayName: 'Gemini 4 Carbon', disabled: true },
+              'gemini-4-neon-medium': { displayName: 'Gemini 4 Neon (Medium)', maxTokens: 1_048_576, maxOutputTokens: 65_536, model: 'MODEL_PLACEHOLDER_M610' },
+            },
+          }))),
+        },
+      })
+
+      expect((await firstAdapter.listModels(ANTIGRAVITY_PROVIDER)).map(model => model.id)).toEqual([
+        'antigravity-gemini-4-hydrogen',
+        'antigravity-gemini-4-neon',
+      ])
+
+      const restartedAdapter = new AntigravityAdapter({
+        auth: { credential: vi.fn(async () => credential('access')) },
+        catalogCachePath: cachePath,
+        transport: {
+          request: vi.fn(async () => new Response('', { status: 429 })),
+        },
+      })
+
+      const fallbackIds = (await restartedAdapter.listModels(ANTIGRAVITY_PROVIDER)).map(model => model.id)
+      expect(fallbackIds).toEqual([
+        'antigravity-gemini-4-hydrogen',
+        'antigravity-gemini-4-neon',
+      ])
+
+      const fallbackCatalog = await restartedAdapter.modelCatalog()
+      expect(fallbackCatalog).toMatchObject({
+        state: 'refresh-failed',
+        cached: true,
+      })
+      expect(fallbackCatalog.models.map(model => model.id)).toEqual([
+        'antigravity-gemini-4-hydrogen',
+        'antigravity-gemini-4-neon',
+      ])
+
+      await expect(restartedAdapter.resolveModel(ANTIGRAVITY_PROVIDER, 'antigravity-gemini-4-neon'))
+        .resolves.toMatchObject({ id: 'antigravity-gemini-4-neon', defaultMaxTokens: 65_536 })
+
+      restartedAdapter.invalidateModelCatalog(true)
+      const afterClear = await restartedAdapter.modelCatalog()
+      expect(afterClear.state).toBe('refresh-failed')
+      expect(afterClear.cached).toBeUndefined()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 })

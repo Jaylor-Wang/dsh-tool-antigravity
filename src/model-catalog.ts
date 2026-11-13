@@ -20,9 +20,11 @@ export interface AntigravityModelCatalogView {
   readonly state: AntigravityModelCatalogState
   readonly models: readonly AntigravityModelCatalogEntry[]
   readonly checkedAt?: string
+  readonly cached?: boolean
 }
 
 export interface AntigravityModelCatalogService {
   catalogSnapshot(): AntigravityModelCatalogView
   modelCatalog(signal?: AbortSignal, forceRefresh?: boolean): Promise<AntigravityModelCatalogView>
+  invalidateModelCatalog?(clearPersisted?: boolean): void
 }

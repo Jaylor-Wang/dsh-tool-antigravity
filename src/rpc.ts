@@ -33,12 +33,16 @@ export async function handleAntigravityAuthRpc(
     if (endpoint === 'select-account') {
       if (!isAccountHandlePayload(payload)) return badRequest('select-account expects { id: string }')
       if (service.selectAccount === undefined) return badRequest('account selection is unavailable')
-      return { ok: true, value: await service.selectAccount(payload.id) }
+      const result = await service.selectAccount(payload.id)
+      if (result.state === 'selected') modelCatalog?.invalidateModelCatalog?.()
+      return { ok: true, value: result }
     }
     if (endpoint === 'remove-account') {
       if (!isAccountHandlePayload(payload)) return badRequest('remove-account expects { id: string }')
       if (service.removeAccount === undefined) return badRequest('account removal is unavailable')
-      return { ok: true, value: await service.removeAccount(payload.id) }
+      const result = await service.removeAccount(payload.id)
+      if (result.state === 'removed') modelCatalog?.invalidateModelCatalog?.()
+      return { ok: true, value: result }
     }
     if (endpoint === 'models') {
       if (!isRefreshPayload(payload)) return badRequest('models expects {} or { force: boolean }')
@@ -69,11 +73,15 @@ export async function handleAntigravityAuthRpc(
     }
     if (endpoint === 'logout') {
       if (!isEmptyRecord(payload)) return badRequest('logout expects an empty payload')
-      return { ok: true, value: await service.logout() }
+      const result = await service.logout()
+      modelCatalog?.invalidateModelCatalog?.(true)
+      return { ok: true, value: result }
     }
     if (endpoint === 'revoke') {
       if (!isRevokePayload(payload)) return badRequest('revoke expects { confirmed: true }')
-      return { ok: true, value: await service.revoke(true, signal) }
+      const result = await service.revoke(true, signal)
+      modelCatalog?.invalidateModelCatalog?.(true)
+      return { ok: true, value: result }
     }
     if (endpoint === 'get-proxy') {
       return { ok: true, value: { proxy: getStoredProxy() } }

@@ -1,5 +1,6 @@
 /** Host half of the private Antigravity bootstrap capability bundle. */
 
+import { dirname, join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
 import type { FileSystem } from '@deepseek-ai/dsh-fs'
@@ -62,6 +63,7 @@ export function apply(ctx: Context, config: AntigravityAuthConfig = {}): void {
   const fs = runtime.reflect?.get?.('fs', false) as FileSystem | undefined
   const adapter = new AntigravityAdapter({
     auth: service,
+    catalogCachePath: join(dirname(defaultAuthStorePath()), 'model-catalog.json'),
     ...(runtime.attachments === undefined ? {} : { attachments: runtime.attachments }),
     ...(fs === undefined ? {} : { fs }),
   })

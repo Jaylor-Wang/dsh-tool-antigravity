@@ -1,6 +1,9 @@
 /** Public DSH LLM adapter for the single Antigravity provider route. */
 
 import { Buffer } from 'node:buffer'
+import { createHash } from 'node:crypto'
+import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { dirname } from 'node:path'
 import {
   AgyRequestSessionStore,
   CLAUDE_DESCRIPTION_PROMPT,
@@ -15,6 +18,7 @@ import {
   getPublicModelDefinitions,
   getResolverAliasMap,
   isGeminiArgonModel,
+  isRetiredAgyModel,
   orderAgyRequestPayloadInPlace,
   resolveModelWithTier,
   toGeminiSchema,
@@ -110,6 +114,30 @@ export interface AntigravityAdapterOptions {
     readImageRequest?(ref: ImageAttachmentRef, bounds: unknown, signal?: AbortSignal): Promise<{ data: Uint8Array; mediaType: string }>
   }
   readonly fs?: Pick<FileSystem, 'processPathFromHostPath'>
+  /** Optional path to persist the last live server catalog for offline/error fallback across restarts. */
+  readonly catalogCachePath?: string
+}
+
+interface DynamicWireSpec {
+  readonly maxOutputTokens?: number
+  readonly modelEnum?: string
+  readonly thinkingLevel?: 'LOW' | 'MEDIUM' | 'HIGH' | 'XHIGH'
+  readonly supportsThinking?: boolean
+}
+
+interface DynamicCatalogContext {
+  readonly definitions: Readonly<Record<string, ReturnType<typeof getPublicModelDefinitions>[string]>>
+  readonly wireSpecs: Readonly<Record<string, DynamicWireSpec>>
+  readonly modelBaseByPublicId: Readonly<Record<string, string>>
+}
+
+interface CachedLiveCatalog {
+  readonly checkedAt: string
+  readonly availableIds: readonly string[]
+  readonly dynamicDefinitions: Readonly<Record<string, ReturnType<typeof getPublicModelDefinitions>[string]>>
+  readonly dynamicWireSpecs: Readonly<Record<string, DynamicWireSpec>>
+  readonly modelBaseByPublicId: Readonly<Record<string, string>>
+  readonly catalogEntries: readonly AntigravityModelCatalogView['models'][number][]
 }
 
 interface ProviderPartText {
@@ -151,9 +179,15 @@ export class AntigravityAdapter extends LlmAdapter {
   }
   private readonly definitions = buildPublicModelDefinitions()
   private catalogProjectId: string | undefined
+  private catalogAccountKey: string | undefined
   private catalogExpiresAt = 0
-  private catalogModelIds = new Set<string>()
+  private catalogLive: ParsedLiveCatalog | undefined
   private catalogFailureCode: string | undefined
+  private lastAttemptedCacheKey: string | undefined
+  private readonly staleCacheByKey = new Map<string, CachedLiveCatalog>()
+  private readonly dynamicDefinitions: Record<string, ReturnType<typeof getPublicModelDefinitions>[string]> = {}
+  private readonly dynamicWireSpecs: Record<string, DynamicWireSpec> = {}
+  private readonly dynamicBaseByPublicId: Record<string, string> = {}
   private catalogView: AntigravityModelCatalogView
 
   constructor(private readonly adapterOptions: AntigravityAdapterOptions) {
@@ -168,6 +202,7 @@ export class AntigravityAdapter extends LlmAdapter {
       maxResponseBytes: boundedLimit(adapterOptions.maxResponseBytes, DEFAULT_PRIVATE_RESPONSE_BYTES),
       maxFrameBytes: boundedLimit(adapterOptions.maxFrameBytes, DEFAULT_PRIVATE_FRAME_BYTES),
     }
+    this.loadPersistedCatalogCache()
     this.catalogView = createCatalogView(this.definitions, 'snapshot')
   }
 
@@ -190,11 +225,20 @@ export class AntigravityAdapter extends LlmAdapter {
   }
 
   /** Forget account-bound availability when Gate 0 or the credential is replaced. */
-  invalidateModelCatalog(): void {
+  invalidateModelCatalog(clearPersisted = false): void {
     this.catalogProjectId = undefined
+    this.catalogAccountKey = undefined
     this.catalogExpiresAt = 0
-    this.catalogModelIds = new Set<string>()
+    this.catalogLive = undefined
     this.catalogFailureCode = undefined
+    this.lastAttemptedCacheKey = undefined
+    if (clearPersisted) {
+      this.staleCacheByKey.clear()
+      for (const key of Object.keys(this.dynamicDefinitions)) delete this.dynamicDefinitions[key]
+      for (const key of Object.keys(this.dynamicWireSpecs)) delete this.dynamicWireSpecs[key]
+      for (const key of Object.keys(this.dynamicBaseByPublicId)) delete this.dynamicBaseByPublicId[key]
+      this.clearPersistedCatalogCache()
+    }
     this.catalogView = createCatalogView(this.definitions, 'snapshot')
   }
 
@@ -206,11 +250,12 @@ export class AntigravityAdapter extends LlmAdapter {
   /** Refresh the advisory catalog and collapse failures into browser-safe state. */
   async modelCatalog(signal?: AbortSignal, forceRefresh = false): Promise<AntigravityModelCatalogView> {
     try {
-      const available = await this.readLiveModelIds(signal, forceRefresh)
-      this.catalogView = createCatalogView(this.definitions, 'live-available', available, new Date().toISOString())
+      const live = await this.readLiveCatalog(signal, forceRefresh)
+      const checkedAt = new Date().toISOString()
+      this.catalogView = createLiveCatalogView(this.definitions, live, checkedAt)
     } catch (error) {
       const state = error instanceof LlmError && error.code === 'PROTOCOL_DRIFT' ? 'protocol-drift' : 'refresh-failed'
-      this.catalogView = createCatalogView(this.definitions, state, undefined, new Date().toISOString())
+      this.catalogView = this.buildFallbackCatalogView(state, this.lastAttemptedCacheKey)
     }
     return cloneCatalogView(this.catalogView)
   }
@@ -218,30 +263,53 @@ export class AntigravityAdapter extends LlmAdapter {
   override async listModels(provider: string, signal?: AbortSignal): Promise<readonly LlmModelInfo[]> {
     this.providerInfo(provider)
     const snapshot = this.pinnedTextModelInfos()
-    let available: ReadonlySet<string>
+    let live: ParsedLiveCatalog
     try {
-      available = await this.readLiveModelIds(signal)
-      this.catalogView = createCatalogView(this.definitions, 'live-available', available, new Date().toISOString())
+      live = await this.readLiveCatalog(signal)
+      this.catalogView = createLiveCatalogView(this.definitions, live, new Date().toISOString())
     } catch (error) {
       const state = error instanceof LlmError && error.code === 'PROTOCOL_DRIFT' ? 'protocol-drift' : 'refresh-failed'
-      this.catalogView = createCatalogView(this.definitions, state, undefined, new Date().toISOString())
+      this.catalogView = this.buildFallbackCatalogView(state, this.lastAttemptedCacheKey)
       if (!canFallBackToPinnedTextSnapshot(error)) throw error
+      const cached = this.resolveFallbackCache(this.lastAttemptedCacheKey)
+      if (cached !== undefined) return this.cachedTextModelInfos(cached)
       // DSH drops the whole provider group when a transient discovery failure escapes.
-      // The local snapshot remains advisory; Settings still reports the live failure state.
+      // When no live cache exists yet, fall back to the known snapshot list safely.
       return snapshot
     }
-    return snapshot.filter(model => available.has(model.id))
+    return liveTextModelInfos(this.definitions, live)
   }
 
   private pinnedTextModelInfos(): readonly LlmModelInfo[] {
     return Object.values(this.definitions)
       .filter(definition => !definition.modalities.output.includes('image'))
-      .map(definition => ({
-        provider: ANTIGRAVITY_PROVIDER,
-        id: definition.id,
-        name: cleanModelDisplayName(definition.name),
-        inputModalities: definition.modalities.input.filter((item): item is 'text' | 'image' => item === 'text' || item === 'image'),
-      }))
+      .map(toLlmModelInfo)
+  }
+
+  private cachedTextModelInfos(cached: CachedLiveCatalog): readonly LlmModelInfo[] {
+    const merged: Record<string, ReturnType<typeof getPublicModelDefinitions>[string]> = {
+      ...this.definitions,
+      ...cached.dynamicDefinitions,
+    }
+    const available = new Set(cached.availableIds)
+    return Object.values(merged)
+      .filter(definition => !definition.modalities.output.includes('image') && available.has(definition.id))
+      .map(toLlmModelInfo)
+  }
+
+  private allKnownDefinitions(): Readonly<Record<string, ReturnType<typeof getPublicModelDefinitions>[string]>> {
+    return {
+      ...this.dynamicDefinitions,
+      ...this.definitions,
+    }
+  }
+
+  private dynamicCatalogContext(): DynamicCatalogContext {
+    return {
+      definitions: this.dynamicDefinitions,
+      wireSpecs: this.dynamicWireSpecs,
+      modelBaseByPublicId: this.dynamicBaseByPublicId,
+    }
   }
 
   override async resolveModel(provider: string, model: string, _signal?: AbortSignal): Promise<LlmResolvedModelInfo> {
@@ -249,11 +317,11 @@ export class AntigravityAdapter extends LlmAdapter {
     if (typeof model !== 'string' || model.trim().length === 0 || model.length > 256) {
       throw new LlmError('The Antigravity model id is invalid', 'INVALID_MODEL')
     }
-    const definition = this.definitions[model]
+    const definition = this.allKnownDefinitions()[model]
     if (definition === undefined || definition.modalities.output.includes('image')) {
       throw new LlmError('The Antigravity model is not in the audited text model snapshot', 'INVALID_MODEL')
     }
-    const reasoning = getModelReasoningEfforts(model)
+    const reasoning = getModelReasoningEfforts(model, definition)
     return {
       provider: ANTIGRAVITY_PROVIDER,
       id: definition.id,
@@ -270,7 +338,7 @@ export class AntigravityAdapter extends LlmAdapter {
       throw new LlmError('The Antigravity adapter received an unknown provider route', 'NO_ADAPTER')
     }
     const signal = options.signal
-    const requestedDefinition = this.definitions[options.model]
+    const requestedDefinition = this.allKnownDefinitions()[options.model]
     if (requestedDefinition === undefined || requestedDefinition.modalities.output.includes('image')) throw new LlmError('The Antigravity model is not in the audited text model snapshot', 'INVALID_MODEL')
     if (isAborted(signal)) {
       yield finishChunk('aborted', 'CANCELLED')
@@ -292,7 +360,7 @@ export class AntigravityAdapter extends LlmAdapter {
       const requestScope = this.sessions.beginRequest(sessionKey)
       let payload: Record<string, unknown> & { sentImageBytes?: Map<string, number> }
       try {
-        payload = await buildAntigravityGeneratePayloadForAdapter(options, credential, requestScope.session, requestScope.timestamp, this.adapterOptions.attachments, this.adapterOptions.fs)
+        payload = await buildAntigravityGeneratePayloadForAdapter(options, credential, requestScope.session, requestScope.timestamp, this.adapterOptions.attachments, this.adapterOptions.fs, this.dynamicCatalogContext())
       } catch (error) {
         if (error instanceof LlmError) throw error
         throw new LlmError('The Antigravity image input could not be admitted safely', 'UNSUPPORTED_MODALITY')
@@ -485,16 +553,18 @@ export class AntigravityAdapter extends LlmAdapter {
     yield finishChunk(mapFinishReason(finish), finish ?? 'STOP', undefined, replayState)
   }
 
-  private async readLiveModelIds(
+  private async readLiveCatalog(
     signal: AbortSignal | undefined,
     bypassCache = false,
     forceCredentialRefresh = false,
-  ): Promise<ReadonlySet<string>> {
+  ): Promise<ParsedLiveCatalog> {
     const credential = await this.readCredential(signal, forceCredentialRefresh)
     if (credential === undefined) throw new LlmError('Antigravity login is required before model discovery', 'AUTH')
-    if (!bypassCache && this.catalogProjectId === credential.projectId && Date.now() < this.catalogExpiresAt) {
+    const accountKey = accountCacheKey(credential)
+    this.lastAttemptedCacheKey = accountKey
+    if (!bypassCache && this.catalogAccountKey === accountKey && this.catalogProjectId === credential.projectId && Date.now() < this.catalogExpiresAt) {
       if (this.catalogFailureCode !== undefined) throw new LlmError('The Antigravity live model catalog refresh remains unavailable', this.catalogFailureCode)
-      return this.catalogModelIds
+      if (this.catalogLive !== undefined) return this.catalogLive
     }
     let response: Response
     const body = credential.projectId ? { project: credential.projectId } : {}
@@ -508,7 +578,7 @@ export class AntigravityAdapter extends LlmAdapter {
       })
     } catch (error) {
       const failure = toModelCatalogError(error, signal, 'provider')
-      this.rememberCatalogFailure(credential.projectId, failure)
+      this.rememberCatalogFailure(credential.projectId, accountKey, failure)
       throw failure
     }
     if (response.status === 403 && credential.projectId) {
@@ -530,7 +600,7 @@ export class AntigravityAdapter extends LlmAdapter {
         const failure = toModelCatalogError(error, signal, 'provider')
         if (failure.code === 'CANCELLED' || failure.code === 'GATE_0_ATTRIBUTION') {
           await cancelResponse(response)
-          this.rememberCatalogFailure(credential.projectId, failure)
+          this.rememberCatalogFailure(credential.projectId, accountKey, failure)
           throw failure
         }
         // Keep the original project-scoped 403 as the authoritative failure.
@@ -541,10 +611,10 @@ export class AntigravityAdapter extends LlmAdapter {
       await cancelResponse(response)
       if (statusError.code === 'authentication' && !forceCredentialRefresh && !isAborted(signal)) {
         this.catalogExpiresAt = 0
-        return this.readLiveModelIds(signal, true, true)
+        return this.readLiveCatalog(signal, true, true)
       }
       const failure = toLlmError(statusError)
-      this.rememberCatalogFailure(credential.projectId, failure)
+      this.rememberCatalogFailure(credential.projectId, accountKey, failure)
       throw failure
     }
     let value: unknown
@@ -557,30 +627,120 @@ export class AntigravityAdapter extends LlmAdapter {
       })) as unknown
     } catch (error) {
       const failure = toModelCatalogError(error, signal, 'protocol')
-      this.rememberCatalogFailure(credential.projectId, failure)
+      this.rememberCatalogFailure(credential.projectId, accountKey, failure)
       throw failure
     }
-    let ids: Set<string>
-    try { ids = parseLiveModelIds(value, this.definitions) } catch (error) {
+    let parsed: ParsedLiveCatalog
+    try { parsed = parseLiveCatalog(value, this.definitions) } catch (error) {
       const failure = error instanceof LlmError
         ? error
         : new LlmError('The Antigravity live model catalog did not match the audited schema', 'PROTOCOL_DRIFT')
-      this.rememberCatalogFailure(credential.projectId, failure)
+      this.rememberCatalogFailure(credential.projectId, accountKey, failure)
       throw failure
     }
     this.catalogProjectId = credential.projectId
-    this.catalogModelIds = ids
+    this.catalogAccountKey = accountKey
+    this.catalogLive = parsed
     this.catalogFailureCode = undefined
     this.catalogExpiresAt = Date.now() + MODEL_CATALOG_TTL_MS
-    return ids
+    this.recordDynamicAndStaleCache(accountKey, parsed)
+    return parsed
   }
 
-  private rememberCatalogFailure(projectId: string, failure: LlmError): void {
+  private rememberCatalogFailure(projectId: string, accountKey: string, failure: LlmError): void {
     if (failure.code === 'AUTH' || failure.code === 'CANCELLED') return
     this.catalogProjectId = projectId
-    this.catalogModelIds = new Set<string>()
+    this.catalogAccountKey = accountKey
+    this.catalogLive = undefined
     this.catalogFailureCode = failure.code
     this.catalogExpiresAt = Date.now() + MODEL_CATALOG_TTL_MS
+  }
+
+  private recordDynamicAndStaleCache(accountKey: string, parsed: ParsedLiveCatalog): void {
+    Object.assign(this.dynamicDefinitions, parsed.dynamicDefinitions)
+    Object.assign(this.dynamicWireSpecs, parsed.dynamicWireSpecs)
+    Object.assign(this.dynamicBaseByPublicId, parsed.modelBaseByPublicId)
+    const checkedAt = new Date().toISOString()
+    const liveView = createLiveCatalogView(this.definitions, parsed, checkedAt)
+    const availableEntries = liveView.models
+      .filter(entry => entry.state === 'live-available')
+      .map(entry => ({
+        id: entry.id,
+        name: entry.name,
+        state: 'snapshot' as const,
+      }))
+    const cached: CachedLiveCatalog = {
+      checkedAt,
+      availableIds: [...parsed.availableIds],
+      dynamicDefinitions: { ...parsed.dynamicDefinitions },
+      dynamicWireSpecs: { ...parsed.dynamicWireSpecs },
+      modelBaseByPublicId: { ...parsed.modelBaseByPublicId },
+      catalogEntries: availableEntries,
+    }
+    this.staleCacheByKey.set(accountKey, cached)
+    if (this.staleCacheByKey.size > 16) {
+      const oldestKey = this.staleCacheByKey.keys().next().value
+      if (oldestKey !== undefined) this.staleCacheByKey.delete(oldestKey)
+    }
+    this.savePersistedCatalogCache()
+  }
+
+  private resolveFallbackCache(accountKey: string | undefined): CachedLiveCatalog | undefined {
+    if (accountKey === undefined) return undefined
+    return this.staleCacheByKey.get(accountKey)
+  }
+
+  private buildFallbackCatalogView(state: AntigravityModelCatalogState, accountKey: string | undefined): AntigravityModelCatalogView {
+    const cached = this.resolveFallbackCache(accountKey)
+    if (cached !== undefined && cached.catalogEntries.length > 0) {
+      return {
+        state,
+        cached: true,
+        checkedAt: cached.checkedAt,
+        models: cached.catalogEntries.map(entry => ({ ...entry, state: 'snapshot' as const })),
+      }
+    }
+    return createCatalogView(this.definitions, state, undefined, new Date().toISOString())
+  }
+
+  private loadPersistedCatalogCache(): void {
+    const filePath = this.adapterOptions.catalogCachePath
+    if (filePath === undefined) return
+    try {
+      const raw = readFileSync(filePath, 'utf-8')
+      const parsed = parsePersistedCatalogFile(JSON.parse(raw))
+      for (const [key, entry] of Object.entries(parsed)) {
+        this.staleCacheByKey.set(key, entry)
+        Object.assign(this.dynamicDefinitions, entry.dynamicDefinitions)
+        Object.assign(this.dynamicWireSpecs, entry.dynamicWireSpecs)
+        Object.assign(this.dynamicBaseByPublicId, entry.modelBaseByPublicId)
+      }
+    } catch {
+      // Cache file is strictly advisory; missing or unreadable cache falls back cleanly.
+    }
+  }
+
+  private savePersistedCatalogCache(): void {
+    const filePath = this.adapterOptions.catalogCachePath
+    if (filePath === undefined) return
+    try {
+      mkdirSync(dirname(filePath), { recursive: true })
+      const entries: Record<string, CachedLiveCatalog> = {}
+      for (const [key, value] of this.staleCacheByKey.entries()) entries[key] = value
+      writeFileSync(filePath, JSON.stringify({ version: 1, accounts: entries }), { encoding: 'utf-8', mode: 0o600 })
+    } catch {
+      // Cache persistence is best-effort only.
+    }
+  }
+
+  private clearPersistedCatalogCache(): void {
+    const filePath = this.adapterOptions.catalogCachePath
+    if (filePath === undefined) return
+    try {
+      unlinkSync(filePath)
+    } catch {
+      // Ignore missing cache file on logout/revoke.
+    }
   }
 
   private async readCredential(signal: AbortSignal | undefined, forceRefresh: boolean, family?: string): Promise<HostCredential | undefined> {
@@ -727,7 +887,12 @@ function cleanModelDisplayName(name: string): string {
   return name.replace(/\s*\([^)]*\)\s*$/u, '').trim()
 }
 
-function getModelReasoningEfforts(modelId: string): { efforts: readonly { id: ReturnType<typeof ReasoningEffortId>; name: string }[]; defaultEffort: ReturnType<typeof ReasoningEffortId> } | undefined {
+const DYNAMIC_EFFORT_ORDER: readonly Gemini4ExtraEffort[] = ['low', 'medium', 'high', 'xhigh']
+
+function getModelReasoningEfforts(
+  modelId: string,
+  definition?: ReturnType<typeof getPublicModelDefinitions>[string],
+): { efforts: readonly { id: ReturnType<typeof ReasoningEffortId>; name: string }[]; defaultEffort: ReturnType<typeof ReasoningEffortId> } | undefined {
   const extraFamily = findExtraGemini4Family(modelId)
   if (extraFamily !== undefined) {
     return {
@@ -761,7 +926,56 @@ function getModelReasoningEfforts(modelId: string): { efforts: readonly { id: Re
       defaultEffort: ReasoningEffortId('low'),
     }
   }
+  if (definition?.reasoning === true && isRecord(definition.variants)) {
+    const keys = DYNAMIC_EFFORT_ORDER.filter(effort => Object.hasOwn(definition.variants!, effort))
+    if (keys.length > 0) {
+      const defaultEffort: Gemini4ExtraEffort = keys.includes('high') && keys.includes('xhigh')
+        ? 'high'
+        : keys.includes('medium')
+          ? 'medium'
+          : keys.includes('high')
+            ? 'high'
+            : keys[0]!
+      return {
+        efforts: keys.map(effort => ({
+          id: ReasoningEffortId(effort),
+          name: EFFORT_LABELS[effort],
+        })),
+        defaultEffort: ReasoningEffortId(defaultEffort),
+      }
+    }
+  }
   return undefined
+}
+
+function toLlmModelInfo(definition: ReturnType<typeof getPublicModelDefinitions>[string]): LlmModelInfo {
+  return {
+    provider: ANTIGRAVITY_PROVIDER,
+    id: definition.id,
+    name: cleanModelDisplayName(definition.name),
+    inputModalities: definition.modalities.input.filter((item): item is 'text' | 'image' => item === 'text' || item === 'image'),
+  }
+}
+
+function liveTextModelInfos(
+  staticDefinitions: ReturnType<typeof getPublicModelDefinitions>,
+  live: ParsedLiveCatalog,
+): readonly LlmModelInfo[] {
+  const seen = new Set<string>()
+  const output: LlmModelInfo[] = []
+  for (const definition of Object.values(staticDefinitions)) {
+    if (definition.modalities.output.includes('image') || !live.availableIds.has(definition.id)) continue
+    seen.add(definition.id)
+    output.push(toLlmModelInfo(definition))
+  }
+  for (const id of live.dynamicModelOrder) {
+    if (seen.has(id)) continue
+    const definition = live.dynamicDefinitions[id]
+    if (definition === undefined || definition.modalities.output.includes('image')) continue
+    seen.add(id)
+    output.push(toLlmModelInfo(definition))
+  }
+  return output
 }
 
 function createCatalogView(
@@ -772,6 +986,7 @@ function createCatalogView(
 ): AntigravityModelCatalogView {
   const models = Object.values(definitions)
     .filter(definition => !definition.modalities.output.includes('image'))
+    .slice(0, 64)
     .map(definition => ({
       id: definition.id,
       name: cleanModelDisplayName(definition.name),
@@ -782,24 +997,75 @@ function createCatalogView(
   return { state, models, ...(checkedAt === undefined ? {} : { checkedAt }) }
 }
 
+function createLiveCatalogView(
+  staticDefinitions: ReturnType<typeof getPublicModelDefinitions>,
+  live: ParsedLiveCatalog,
+  checkedAt: string,
+): AntigravityModelCatalogView {
+  const models: AntigravityModelCatalogView['models'][number][] = []
+  const seen = new Set<string>()
+  for (const definition of Object.values(staticDefinitions)) {
+    if (definition.modalities.output.includes('image')) continue
+    seen.add(definition.id)
+    models.push({
+      id: definition.id,
+      name: cleanModelDisplayName(definition.name),
+      state: live.availableIds.has(definition.id) ? 'live-available' : 'unavailable',
+    })
+  }
+  for (const id of live.dynamicModelOrder) {
+    if (seen.has(id) || models.length >= 64) continue
+    const definition = live.dynamicDefinitions[id]
+    if (definition === undefined || definition.modalities.output.includes('image')) continue
+    seen.add(id)
+    models.push({
+      id: definition.id,
+      name: cleanModelDisplayName(definition.name),
+      state: 'live-available',
+    })
+  }
+  return { state: 'live-available', models, checkedAt }
+}
+
 function cloneCatalogView(value: AntigravityModelCatalogView): AntigravityModelCatalogView {
   return {
     state: value.state,
     models: value.models.map(model => ({ ...model })),
     ...(value.checkedAt === undefined ? {} : { checkedAt: value.checkedAt }),
+    ...(value.cached === undefined ? {} : { cached: value.cached }),
   }
 }
 
-function parseLiveModelIds(
+interface ParsedLiveCatalog {
+  readonly availableIds: Set<string>
+  readonly dynamicDefinitions: Record<string, ReturnType<typeof getPublicModelDefinitions>[string]>
+  readonly dynamicWireSpecs: Record<string, DynamicWireSpec>
+  readonly modelBaseByPublicId: Record<string, string>
+  readonly dynamicModelOrder: string[]
+}
+
+interface DynamicModelAccumulator {
+  readonly wireBase: string
+  readonly publicId: string
+  displayName: string
+  contextWindow: number
+  maxOutputTokens: number
+  supportsImages: boolean
+  supportsThinking: boolean
+  readonly efforts: Set<Gemini4ExtraEffort>
+}
+
+function parseLiveCatalog(
   value: unknown,
   definitions: ReturnType<typeof getPublicModelDefinitions>,
-): Set<string> {
+): ParsedLiveCatalog {
   const root = isRecord(value) && isRecord(value.response) ? value.response : value
   if (!isRecord(root) || !isRecord(root.models)) throw new LlmError('The Antigravity live model catalog did not match the audited schema', 'PROTOCOL_DRIFT')
   const entries = Object.entries(root.models)
   if (entries.length > 512) throw new LlmError('The Antigravity live model catalog exceeded the model limit', 'PROTOCOL_DRIFT')
   const aliases = getResolverAliasMap()
   const live = new Set<string>()
+  const activeEntries: Array<{ cleanId: string; rawEntry: Record<string, unknown> }> = []
   for (const [id, rawEntry] of entries) {
     if (!safeModelId(id) || !isRecord(rawEntry)) throw new LlmError('The Antigravity live model catalog did not match the audited schema', 'PROTOCOL_DRIFT')
     const cleanId = cleanModelId(id)
@@ -856,12 +1122,17 @@ function parseLiveModelIds(
       live.add(canonicalWireModel(cleanName, aliases))
       live.add(cleanName)
     }
+    activeEntries.push({ cleanId, rawEntry })
   }
   const available = new Set<string>()
+  const staticWireRoots = new Set<string>()
   for (const definition of Object.values(definitions)) {
     const resolved = resolveWireModel(definition.id)
     const cleanResolved = cleanModelId(resolved)
     const canonical = canonicalWireModel(cleanResolved, aliases)
+    const strippedDefBase = definition.id.toLowerCase().replace(/^antigravity-/u, '').replace(/-(?:minimal|low|medium|high|xhigh)$/iu, '')
+    staticWireRoots.add(cleanResolved.toLowerCase().replace(/-(?:minimal|low|medium|high|xhigh)$/iu, ''))
+    staticWireRoots.add(strippedDefBase)
     if (
       live.has(canonical)
       || live.has(cleanResolved)
@@ -878,7 +1149,212 @@ function parseLiveModelIds(
       available.add(definition.id)
     }
   }
-  return available
+  const dynamicWireSpecs: Record<string, DynamicWireSpec> = {}
+  const groups = new Map<string, DynamicModelAccumulator>()
+  const dynamicModelOrder: string[] = []
+  for (const { cleanId, rawEntry } of activeEntries) {
+    if (rawEntry.isInternal === true || cleanId.startsWith('tab_') || isImageModelId(cleanId) || isRetiredAgyModel(cleanId)) continue
+    if (!isDiscoverableServerModel(cleanId, rawEntry)) continue
+    const lower = cleanId.toLowerCase()
+    const effortMatch = lower.match(/^(.+?)-(minimal|low|medium|high|xhigh)$/iu)
+    const rawEffort = effortMatch?.[2]
+    const effort: Gemini4ExtraEffort | undefined = rawEffort === 'minimal' ? 'low' : rawEffort as Gemini4ExtraEffort | undefined
+    const spec = extractDynamicWireSpec(rawEntry, effort)
+    if (spec !== undefined) {
+      dynamicWireSpecs[lower] = spec
+    }
+    const candidateWireBase = effortMatch !== null ? cleanId.slice(0, effortMatch[1]!.length) : cleanId
+    const lowerBase = candidateWireBase.toLowerCase()
+    if (matchesStaticDefinition(lower, lowerBase, aliases, staticWireRoots, definitions)) {
+      continue
+    }
+    const publicId = candidateWireBase.startsWith('antigravity-') ? candidateWireBase : `antigravity-${candidateWireBase}`
+    let group = groups.get(publicId)
+    const displayName = typeof rawEntry.displayName === 'string' && rawEntry.displayName.trim().length > 0
+      ? cleanModelDisplayName(rawEntry.displayName)
+      : candidateWireBase
+    const contextWindow = positiveBoundedInt(rawEntry.maxTokens, 1_048_576, 10_000_000)
+    const maxOutputTokens = positiveBoundedInt(rawEntry.maxOutputTokens, 65_536, 1_000_000)
+    if (group === undefined) {
+      group = {
+        wireBase: candidateWireBase,
+        publicId,
+        displayName,
+        contextWindow,
+        maxOutputTokens,
+        supportsImages: rawEntry.supportsImages !== false,
+        supportsThinking: rawEntry.supportsThinking === true || effort !== undefined,
+        efforts: new Set(),
+      }
+      groups.set(publicId, group)
+      dynamicModelOrder.push(publicId)
+    } else {
+      group.contextWindow = Math.max(group.contextWindow, contextWindow)
+      group.maxOutputTokens = Math.max(group.maxOutputTokens, maxOutputTokens)
+      if (rawEntry.supportsImages === false) group.supportsImages = false
+      if (rawEntry.supportsThinking === true || effort !== undefined) group.supportsThinking = true
+    }
+    if (effort !== undefined) group.efforts.add(effort)
+  }
+
+  const dynamicDefinitions: Record<string, ReturnType<typeof getPublicModelDefinitions>[string]> = {}
+  const modelBaseByPublicId: Record<string, string> = {}
+  for (const publicId of dynamicModelOrder) {
+    const group = groups.get(publicId)
+    if (group === undefined) continue
+    const sortedEfforts = DYNAMIC_EFFORT_ORDER.filter(item => group.efforts.has(item))
+    const variants: Record<string, { thinkingLevel: string }> = {}
+    for (const effort of sortedEfforts) variants[effort] = { thinkingLevel: effort }
+    const definition: ReturnType<typeof getPublicModelDefinitions>[string] = {
+      id: publicId,
+      name: group.displayName,
+      release_date: '',
+      attachment: group.supportsImages,
+      reasoning: group.supportsThinking,
+      temperature: true,
+      tool_call: true,
+      cost: { input: 0, output: 0 },
+      options: {},
+      limit: { context: group.contextWindow, output: group.maxOutputTokens },
+      modalities: {
+        input: group.supportsImages ? ['text', 'image', 'pdf'] : ['text'],
+        output: ['text'],
+      },
+    }
+    if (sortedEfforts.length > 0) {
+      definition.variants = variants as NonNullable<ReturnType<typeof getPublicModelDefinitions>[string]['variants']>
+    }
+    dynamicDefinitions[publicId] = definition
+    modelBaseByPublicId[publicId] = group.wireBase
+    available.add(publicId)
+  }
+  return { availableIds: available, dynamicDefinitions, dynamicWireSpecs, modelBaseByPublicId, dynamicModelOrder }
+}
+
+function accountCacheKey(credential: HostCredential): string {
+  return createHash('sha256')
+    .update(`antigravity-catalog-v1/${credential.projectId}/${credential.refreshToken}`)
+    .digest('hex')
+    .slice(0, 16)
+}
+
+function isImageModelId(cleanId: string): boolean {
+  const lower = cleanId.toLowerCase()
+  return lower.startsWith('imagen') || /(?:^|-)image(?:$|-)/u.test(lower)
+}
+
+function isDiscoverableServerModel(cleanId: string, rawEntry: Record<string, unknown>): boolean {
+  const lower = cleanId.toLowerCase()
+  if (
+    lower.startsWith('gemini-')
+    || lower.startsWith('claude-')
+    || lower.startsWith('gpt-oss-')
+  ) {
+    return true
+  }
+  return (
+    (typeof rawEntry.model === 'string' && rawEntry.model.length > 0 && rawEntry.model.length <= 256 && !containsControl(rawEntry.model))
+    || typeof rawEntry.maxTokens === 'number'
+    || typeof rawEntry.maxOutputTokens === 'number'
+    || (typeof rawEntry.modelProvider === 'string' && rawEntry.modelProvider.length > 0)
+    || (typeof rawEntry.apiProvider === 'string' && rawEntry.apiProvider.length > 0)
+  )
+}
+
+function positiveBoundedInt(value: unknown, fallback: number, max: number): number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 && value <= max
+    ? value
+    : fallback
+}
+
+function extractDynamicWireSpec(rawEntry: Record<string, unknown>, effort: Gemini4ExtraEffort | undefined): DynamicWireSpec | undefined {
+  const modelEnum = typeof rawEntry.model === 'string' && rawEntry.model.length > 0 && rawEntry.model.length <= 256 && !containsControl(rawEntry.model)
+    ? rawEntry.model
+    : undefined
+  const maxOutputTokens = typeof rawEntry.maxOutputTokens === 'number' && Number.isSafeInteger(rawEntry.maxOutputTokens) && rawEntry.maxOutputTokens > 0 && rawEntry.maxOutputTokens <= 1_000_000
+    ? rawEntry.maxOutputTokens
+    : undefined
+  const rawThinkingLevel = typeof rawEntry.thinkingLevel === 'string' ? rawEntry.thinkingLevel.toUpperCase() : undefined
+  const thinkingLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'XHIGH' | undefined = rawThinkingLevel === 'LOW' || rawThinkingLevel === 'MEDIUM' || rawThinkingLevel === 'HIGH' || rawThinkingLevel === 'XHIGH'
+    ? rawThinkingLevel
+    : effort === undefined
+      ? undefined
+      : (effort.toUpperCase() as 'LOW' | 'MEDIUM' | 'HIGH' | 'XHIGH')
+  const supportsThinking = typeof rawEntry.supportsThinking === 'boolean' ? rawEntry.supportsThinking : undefined
+  if (modelEnum === undefined && maxOutputTokens === undefined && thinkingLevel === undefined && supportsThinking === undefined) {
+    return undefined
+  }
+  return {
+    ...(modelEnum === undefined ? {} : { modelEnum }),
+    ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
+    ...(thinkingLevel === undefined ? {} : { thinkingLevel }),
+    ...(supportsThinking === undefined ? {} : { supportsThinking }),
+  }
+}
+
+function matchesStaticDefinition(
+  lowerCleanId: string,
+  lowerBase: string,
+  aliases: Readonly<Record<string, string>>,
+  staticWireRoots: ReadonlySet<string>,
+  definitions: ReturnType<typeof getPublicModelDefinitions>,
+): boolean {
+  const canonical = canonicalWireModel(lowerCleanId, aliases).toLowerCase()
+  if (
+    staticWireRoots.has(lowerCleanId)
+    || staticWireRoots.has(lowerBase)
+    || staticWireRoots.has(canonical)
+    || Object.hasOwn(definitions, lowerCleanId)
+    || Object.hasOwn(definitions, `antigravity-${lowerCleanId}`)
+    || Object.hasOwn(definitions, `antigravity-${lowerBase}`)
+  ) {
+    return true
+  }
+  if (lowerCleanId.startsWith('gemini-3-flash') || lowerCleanId.startsWith('gemini-3.5-flash') || lowerCleanId.startsWith('gemini-3.8-flash')) return true
+  if (lowerCleanId.startsWith('gemini-4-argon') || lowerCleanId.startsWith('claude-sonnet-5-5') || lowerCleanId.startsWith('claude-opus-5-5')) return true
+  if (findExtraGemini4Family(lowerCleanId) !== undefined || findExtraGemini4Family(lowerBase) !== undefined) return true
+  return false
+}
+
+function parsePersistedCatalogFile(value: unknown): Record<string, CachedLiveCatalog> {
+  if (!isRecord(value) || value.version !== 1 || !isRecord(value.accounts)) return {}
+  const output: Record<string, CachedLiveCatalog> = {}
+  let count = 0
+  for (const [key, rawAccount] of Object.entries(value.accounts)) {
+    if (count >= 16 || !/^[a-f0-9]{16}$/u.test(key) || !isRecord(rawAccount)) continue
+    if (typeof rawAccount.checkedAt !== 'string' || Number.isNaN(Date.parse(rawAccount.checkedAt))) continue
+    if (!Array.isArray(rawAccount.availableIds) || rawAccount.availableIds.length > 64) continue
+    if (!Array.isArray(rawAccount.catalogEntries) || rawAccount.catalogEntries.length === 0 || rawAccount.catalogEntries.length > 64) continue
+    const availableIds: string[] = []
+    for (const id of rawAccount.availableIds) {
+      if (safeModelId(id)) availableIds.push(id)
+    }
+    const catalogEntries: AntigravityModelCatalogView['models'][number][] = []
+    for (const rawEntry of rawAccount.catalogEntries) {
+      if (!isRecord(rawEntry) || !safeModelId(rawEntry.id) || typeof rawEntry.name !== 'string' || rawEntry.name.length === 0 || rawEntry.name.length > 256 || containsControl(rawEntry.name)) continue
+      catalogEntries.push({ id: rawEntry.id, name: rawEntry.name, state: 'snapshot' })
+    }
+    if (catalogEntries.length === 0) continue
+    const dynamicDefinitions = isRecord(rawAccount.dynamicDefinitions)
+      ? rawAccount.dynamicDefinitions as Record<string, ReturnType<typeof getPublicModelDefinitions>[string]>
+      : {}
+    const dynamicWireSpecs = isRecord(rawAccount.dynamicWireSpecs)
+      ? rawAccount.dynamicWireSpecs as Record<string, DynamicWireSpec>
+      : {}
+    const modelBaseByPublicId = isRecord(rawAccount.modelBaseByPublicId)
+      ? rawAccount.modelBaseByPublicId as Record<string, string>
+      : {}
+    output[key] = {
+      checkedAt: rawAccount.checkedAt,
+      availableIds,
+      dynamicDefinitions,
+      dynamicWireSpecs,
+      modelBaseByPublicId,
+      catalogEntries,
+    }
+    count += 1
+  }
+  return output
 }
 
 function cleanModelId(value: string): string {
@@ -1115,6 +1591,7 @@ async function buildAntigravityGeneratePayloadForAdapter(
     readImageRequest?(ref: ImageAttachmentRef, bounds: unknown, signal?: AbortSignal): Promise<{ data: Uint8Array; mediaType: string }>
   }) | undefined,
   fs?: Pick<FileSystem, 'processPathFromHostPath'>,
+  dynamicCatalog?: DynamicCatalogContext,
 ): Promise<Record<string, unknown> & { sentImageBytes?: Map<string, number> }> {
   /** Downscaled byte length actually sent per attachment; requiredImageOffload applies base64Length itself. */
   const sentImageBytes = new Map<string, number>()
@@ -1125,13 +1602,15 @@ async function buildAntigravityGeneratePayloadForAdapter(
     if (message.role === 'system') continue
     contents.push(await mapMessageWithAttachments(message, options.model, toolNames, attachments, options.signal, sentImageBytes))
   }
-  const wireModel = resolveWireModel(options.model, options.reasoningEffort)
-  const payload = buildPayloadFromContents(options, credential, contents)
+  const wireModel = resolveWireModel(options.model, options.reasoningEffort, dynamicCatalog)
+  const payload = buildPayloadFromContents(options, credential, contents, dynamicCatalog)
   const metadata = buildAgyAgentRequestMetadata(session, payload.request as Record<string, unknown>, wireModel, timestamp)
   const extraWireSpec = getExtraGemini4WireSpec(wireModel)
+  const dynamicWireSpec = dynamicCatalog?.wireSpecs[wireModel.toLowerCase()]
   const request = payload.request as Record<string, unknown>
-  request.labels = metadata.labels.model_enum === undefined && extraWireSpec !== undefined
-    ? { ...metadata.labels, model_enum: extraWireSpec.modelEnum }
+  const resolvedModelEnum = metadata.labels.model_enum ?? extraWireSpec?.modelEnum ?? dynamicWireSpec?.modelEnum
+  request.labels = metadata.labels.model_enum === undefined && resolvedModelEnum !== undefined
+    ? { ...metadata.labels, model_enum: resolvedModelEnum }
     : metadata.labels
   request.sessionId = metadata.sessionId
   orderAgyRequestPayloadInPlace(request)
@@ -1177,8 +1656,9 @@ function buildPayloadFromContents(
   options: GenerateOptions,
   credential: HostCredential,
   contents: readonly Record<string, unknown>[],
+  dynamicCatalog?: DynamicCatalogContext,
 ): Record<string, unknown> {
-  const wireModel = resolveWireModel(options.model, options.reasoningEffort)
+  const wireModel = resolveWireModel(options.model, options.reasoningEffort, dynamicCatalog)
   const usesCapturedGemini38ThinkingBudget = /^gemini-3\.8-flash-(?:low|medium|high)$/u.test(wireModel)
   const requestContents = groupClaudeFunctionResponses(contents, options.model)
   const request: Record<string, unknown> = { contents: requestContents }
@@ -1206,9 +1686,11 @@ function buildPayloadFromContents(
   const resolved = resolveModelWithTier(usesCapturedGemini38ThinkingBudget ? wireModel : tieredModel)
   const nativeModel = getAgyNativeModel(wireModel)
   const extraWireSpec = getExtraGemini4WireSpec(wireModel)
+  const dynamicWireSpec = dynamicCatalog?.wireSpecs[wireModel.toLowerCase()]
   const usesAdaptiveNativeThinking = isGeminiArgonModel(wireModel)
     || nativeModel?.supportsAdaptiveThinking === true
     || extraWireSpec !== undefined
+    || dynamicWireSpec?.thinkingLevel !== undefined
   const usesNumericGeminiThinkingBudget = !wireModel.toLowerCase().includes('claude') && !usesAdaptiveNativeThinking && typeof resolved.thinkingBudget === 'number'
   const requestedEffort = resolveEffortForModel(options.model, options.reasoningEffort)
   const thinkingLevel = requestedEffort ?? resolved.thinkingLevel
@@ -1242,6 +1724,16 @@ function buildPayloadFromContents(
           includeThoughts: true,
           thinkingLevel: extraWireSpec.thinkingLevel,
         }
+      } else if (dynamicWireSpec !== undefined) {
+        if (transformedConfig.maxOutputTokens === undefined && dynamicWireSpec.maxOutputTokens !== undefined) {
+          transformedConfig.maxOutputTokens = dynamicWireSpec.maxOutputTokens
+        }
+        if (dynamicWireSpec.thinkingLevel !== undefined && dynamicWireSpec.supportsThinking !== false) {
+          transformedConfig.thinkingConfig = {
+            includeThoughts: true,
+            thinkingLevel: dynamicWireSpec.thinkingLevel,
+          }
+        }
       } else {
         applyAgyNativeGenerationConfig(wireModel, transformedConfig)
       }
@@ -1250,6 +1742,13 @@ function buildPayloadFromContents(
       const transformedConfig = isRecord(request.generationConfig) ? request.generationConfig : {}
       transformedConfig.thinkingConfig = { includeThoughts: true, thinkingBudget: resolved.thinkingBudget }
       request.generationConfig = transformedConfig
+    }
+    if (dynamicWireSpec?.maxOutputTokens !== undefined) {
+      const transformedConfig = isRecord(request.generationConfig) ? request.generationConfig : {}
+      if (transformedConfig.maxOutputTokens === undefined) {
+        transformedConfig.maxOutputTokens = dynamicWireSpec.maxOutputTokens
+        request.generationConfig = transformedConfig
+      }
     }
   }
   const project = credential.projectId === 'inductive-dreamer-qrkws' || !credential.projectId ? undefined : credential.projectId
@@ -1684,14 +2183,38 @@ function resolveModelForTier(model: string, reasoningEffort?: GenerateOptions['r
   return model
 }
 
-function resolveWireModel(model: string, reasoningEffort?: GenerateOptions['reasoningEffort']): string {
+function resolveWireModel(
+  model: string,
+  reasoningEffort?: GenerateOptions['reasoningEffort'],
+  dynamicCatalog?: DynamicCatalogContext,
+): string {
   const extraFamily = findExtraGemini4Family(model)
   if (extraFamily !== undefined) {
     const stripped = model.toLowerCase().replace(/^antigravity-/u, '')
-    if (getExtraGemini4WireSpec(stripped) !== undefined) return stripped
+    if (getExtraGemini4WireSpec(stripped) !== undefined || dynamicCatalog?.wireSpecs[stripped] !== undefined) return stripped
     const effort = resolveEffortForModel(model, reasoningEffort) ?? extraFamily.defaultEffort
     return `${extraFamily.wireBase}-${effort}`
   }
+  const dynamicDefinition = dynamicCatalog?.definitions[model]
+  if (dynamicDefinition !== undefined) {
+    const wireBase = dynamicCatalog?.modelBaseByPublicId[model] ?? model.replace(/^antigravity-/u, '')
+    const normalizedEffort = normalizeReasoningEffort(reasoningEffort)
+    const variants = dynamicDefinition.variants
+    if (variants !== undefined) {
+      if (normalizedEffort !== undefined && Object.hasOwn(variants, normalizedEffort)) {
+        const candidate = `${wireBase}-${normalizedEffort}`
+        if (dynamicCatalog?.wireSpecs[candidate.toLowerCase()] !== undefined) return candidate
+        return candidate
+      }
+      const effortInfo = getModelReasoningEfforts(model, dynamicDefinition)
+      if (effortInfo !== undefined) {
+        return `${wireBase}-${effortInfo.defaultEffort}`
+      }
+    }
+    return wireBase
+  }
+  const stripped = model.replace(/^antigravity-/u, '')
+  if (dynamicCatalog?.wireSpecs[stripped.toLowerCase()] !== undefined) return stripped
   const routeModel = resolveModelForTier(model, reasoningEffort)
   return resolveModelWithTier(routeModel).actualModel
 }

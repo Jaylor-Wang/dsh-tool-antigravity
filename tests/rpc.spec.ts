@@ -232,6 +232,50 @@ describe('Antigravity login RPC', () => {
       state: 'refresh-failed',
       models: [{ ...valid.models[0], state: 'snapshot' }],
     })
+    expect(parseModelCatalogResult({
+      state: 'refresh-failed',
+      cached: true,
+      checkedAt: '2030-01-01T00:00:00.000Z',
+      models: [{ ...valid.models[0], state: 'snapshot' }],
+    })).toEqual({
+      state: 'refresh-failed',
+      cached: true,
+      checkedAt: '2030-01-01T00:00:00.000Z',
+      models: [{ ...valid.models[0], state: 'snapshot' }],
+    })
+    expect(parseModelCatalogResult({
+      state: 'refresh-failed',
+      cached: 'yes',
+      models: [{ ...valid.models[0], state: 'snapshot' }],
+    })).toBeUndefined()
+  })
+
+  it('invalidates the model catalog cache when switching or removing accounts or logging out', async () => {
+    const service = createBootstrapStatusService() as ReturnType<typeof createBootstrapStatusService> & {
+      selectAccount?: (id: string) => Promise<{ state: 'selected' }>
+      removeAccount?: (id: string) => Promise<{ state: 'removed' }>
+    }
+    service.selectAccount = vi.fn(async () => ({ state: 'selected' as const }))
+    service.removeAccount = vi.fn(async () => ({ state: 'removed' as const }))
+    const invalidateModelCatalog = vi.fn()
+    const catalog = {
+      catalogSnapshot: vi.fn(() => ({ state: 'snapshot' as const, models: [{ id: 'antigravity-gemini-3.8-flash', name: 'Gemini 3.8 Flash', state: 'snapshot' as const }] })),
+      modelCatalog: vi.fn(async () => ({ state: 'live-available' as const, models: [{ id: 'antigravity-gemini-3.8-flash', name: 'Gemini 3.8 Flash', state: 'live-available' as const }] })),
+      invalidateModelCatalog,
+    }
+
+    await expect(handleAntigravityAuthRpc(service, 'select-account', { id: 'acc-1' }, signal, catalog))
+      .resolves.toEqual({ ok: true, value: { state: 'selected' } })
+    expect(invalidateModelCatalog).toHaveBeenCalledTimes(1)
+    expect(invalidateModelCatalog).toHaveBeenLastCalledWith()
+
+    await expect(handleAntigravityAuthRpc(service, 'remove-account', { id: 'acc-1' }, signal, catalog))
+      .resolves.toEqual({ ok: true, value: { state: 'removed' } })
+    expect(invalidateModelCatalog).toHaveBeenCalledTimes(2)
+
+    await handleAntigravityAuthRpc(service, 'logout', {}, signal, catalog)
+    expect(invalidateModelCatalog).toHaveBeenCalledWith(true)
+    await service.dispose()
   })
 
   it('validates the browser response as a closed, value-safe quota schema', () => {

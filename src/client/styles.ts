@@ -549,6 +549,25 @@ export const SETTINGS_CSS = `
   color: var(--dsw-alias-state-error-primary, #ef4444);
 }
 
+.agy-alert-warning {
+  background: rgba(234, 179, 8, 0.1);
+  border: 1px solid rgba(234, 179, 8, 0.25);
+  color: #facc15;
+}
+
+.agy-model-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.agy-model-id {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary, #8b949e);
+  word-break: break-all;
+}
+
 .agy-item-list {
   list-style: none;
   margin: 0;
