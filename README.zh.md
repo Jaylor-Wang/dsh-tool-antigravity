@@ -25,7 +25,7 @@
 ### 1. 高性能底层架构
 - **底层长连接池（TLS Socket Keep-Alive）与会话复用**：内置 HTTP/1.1 长连接池与 TLS 票据复用机制，彻底消除逐请求建立 TLS 握手的固有延迟，显著降低首字响应时间（TTFT）。
 - **高吞吐 Buffer 游标滑动 SSE 解析**：在二进制 Buffer 字节层精确定位换行符并切片解码，彻底消除流式推理时高频字符串累加带来的 V8 堆内存重新分配与 GC 抖动。
-- **细粒度思考预算调控**：全面支持 Gemini 3.8/3.7/3.6 Flash、Gemini 3.1 Pro 与 Claude 系列模型的思维链深度配置（`low`, `medium`, `high`）。
+- **细粒度思考预算调控**：全面支持 Gemini 4、Gemini 3.8/3.5 Flash 与 Claude 系列模型的思维链深度配置（`low`, `medium`, `high`，以及 Gemini 4 Hydrogen 的 `xhigh`）。
 - **前置幂等断线自愈**：在流式首字节发出前遇到瞬时网络异常（如 TLS RST / 502 / 503 / 504）时自动平滑重试最多 3 次，提升模型生成稳定性。
 - **Windows 文件锁活性探测**：引入 `process.kill(pid, 0)` 探测，若持有锁的外部进程已异常退出，立即主动回收锁，杜绝 30 秒卡死等待。
 - **配额看板 SWR 容错与微光动效**：重构 5 小时与每周配额解析算法，解决窗口周期判断漂移问题；在接口波动时展示缓存数据与微光动效。
@@ -33,6 +33,8 @@
 ### 2. 支持的模型列表 (`google-antigravity`)
 | 模型标识符 | 显示名称 | 核心模态 | 思考预算支持 |
 | :--- | :--- | :--- | :--- |
+| `antigravity-gemini-4-hydrogen` | Gemini 4 Hydrogen | 文本, 视觉, 工具 | Low / Medium / High / XHigh |
+| `antigravity-gemini-4-carbon` | Gemini 4 Carbon | 文本, 视觉, 工具 | Low / Medium / High |
 | `antigravity-gemini-4-argon` | Gemini 4 Argon | 文本, 视觉, 工具 | Low / Medium / High |
 | `antigravity-gemini-3.8-flash` | Gemini 3.8 Flash | 文本, 视觉, 工具 | Low / Medium / High |
 | `antigravity-gemini-3.5-flash` | Gemini 3.5 Flash | 文本, 视觉, 工具 | Low / Medium / High |

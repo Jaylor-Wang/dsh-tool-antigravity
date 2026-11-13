@@ -25,7 +25,7 @@ Provides private Google OAuth 2.0 PKCE authentication, smart multi-account pooli
 ### 1. High-Performance Core Architecture
 - **TLS Connection Pooling & Session Resumption**: Built-in HTTP/1.1 Keep-Alive socket pool and TLS session resumption against Google endpoints, eliminating repeated TLS handshake roundtrips and significantly reducing Time-To-First-Token (TTFT).
 - **Sliding-Window Buffer SSE Parser**: High-throughput binary chunking directly locates newline separators on raw Buffers, bypassing heavy string concatenations and drastically reducing V8 heap allocations and GC spikes during long reasoning chains.
-- **Granular Thinking Budgets**: Fine-grained reasoning effort configuration (`low`, `medium`, `high`) across Gemini and Claude models with graceful fallbacks.
+- **Granular Thinking Budgets**: Fine-grained reasoning effort configuration (`low`, `medium`, `high`, plus `xhigh` on Gemini 4 Hydrogen) across Gemini and Claude models with graceful fallbacks.
 - **Pre-flight Idempotent Retry**: Automatically retries transient network interruptions (e.g. TLS RST / 502 / 503 / 504) up to 3 times with exponential backoff prior to first byte emission.
 - **Windows File Lock Recovery**: Active PID probing (`process.kill(pid, 0)`) detects stale locks from crashed processes and immediately frees them, preventing 30-second hang timeouts.
 - **Stale-While-Revalidate (SWR) Quota Resilience**: Robust quota normalization supporting 5h and weekly windows; retains and displays last-known valid quota with smooth shimmer animations during transient network disruptions.
@@ -33,6 +33,8 @@ Provides private Google OAuth 2.0 PKCE authentication, smart multi-account pooli
 ### 2. Supported Models (`google-antigravity`)
 | Model Identifier | Display Name | Capabilities | Thinking Budget |
 | :--- | :--- | :--- | :--- |
+| `antigravity-gemini-4-hydrogen` | Gemini 4 Hydrogen | Text, Vision, Tools | Low / Medium / High / XHigh |
+| `antigravity-gemini-4-carbon` | Gemini 4 Carbon | Text, Vision, Tools | Low / Medium / High |
 | `antigravity-gemini-4-argon` | Gemini 4 Argon | Text, Vision, Tools | Low / Medium / High |
 | `antigravity-gemini-3.8-flash` | Gemini 3.8 Flash | Text, Vision, Tools | Low / Medium / High |
 | `antigravity-gemini-3.5-flash` | Gemini 3.5 Flash | Text, Vision, Tools | Low / Medium / High |

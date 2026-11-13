@@ -149,7 +149,7 @@ export class AntigravityAdapter extends LlmAdapter {
   private readonly options: Required<Pick<AntigravityAdapterOptions, 'idleTimeoutMs' | 'totalTimeoutMs' | 'maxResponseBytes' | 'maxFrameBytes'>> & {
     readonly responseHeaderTimeoutMs: number
   }
-  private readonly definitions = getPublicModelDefinitions()
+  private readonly definitions = buildPublicModelDefinitions()
   private catalogProjectId: string | undefined
   private catalogExpiresAt = 0
   private catalogModelIds = new Set<string>()
@@ -621,11 +621,123 @@ export class AntigravityAdapter extends LlmAdapter {
   }
 }
 
+type Gemini4ExtraEffort = 'low' | 'medium' | 'high' | 'xhigh'
+
+interface ExtraGemini4WireSpec {
+  readonly maxOutputTokens: number
+  readonly modelEnum: string
+  readonly thinkingLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'XHIGH'
+}
+
+interface ExtraGemini4FamilySpec {
+  readonly publicId: string
+  readonly wireBase: string
+  readonly displayName: string
+  readonly defaultEffort: Gemini4ExtraEffort
+  readonly efforts: readonly Gemini4ExtraEffort[]
+  readonly contextWindow: number
+  readonly maxOutputTokens: number
+}
+
+const EFFORT_LABELS: Readonly<Record<Gemini4ExtraEffort, string>> = Object.freeze({
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+  xhigh: 'XHigh',
+})
+
+// Supplement @cortexkit/antigravity-auth-core@3.0.14 with Gemini 4 Hydrogen and Carbon models
+// verified from Antigravity server catalogs and newer auth-core metadata without retiring 3.5 Flash.
+const EXTRA_GEMINI4_FAMILIES: readonly ExtraGemini4FamilySpec[] = [
+  {
+    publicId: 'antigravity-gemini-4-hydrogen',
+    wireBase: 'gemini-4-hydrogen',
+    displayName: 'Gemini 4 Hydrogen (Antigravity)',
+    defaultEffort: 'high',
+    efforts: ['low', 'medium', 'high', 'xhigh'],
+    contextWindow: 1_048_576,
+    maxOutputTokens: 262_144,
+  },
+  {
+    publicId: 'antigravity-gemini-4-carbon',
+    wireBase: 'gemini-4-carbon',
+    displayName: 'Gemini 4 Carbon (Antigravity)',
+    defaultEffort: 'medium',
+    efforts: ['low', 'medium', 'high'],
+    contextWindow: 1_048_576,
+    maxOutputTokens: 262_144,
+  },
+]
+
+const EXTRA_GEMINI4_WIRE_SPECS: Readonly<Record<string, ExtraGemini4WireSpec>> = Object.freeze({
+  'gemini-4-hydrogen-low': { maxOutputTokens: 262_144, modelEnum: 'MODEL_PLACEHOLDER_M527', thinkingLevel: 'LOW' },
+  'gemini-4-hydrogen-medium': { maxOutputTokens: 262_144, modelEnum: 'MODEL_PLACEHOLDER_M526', thinkingLevel: 'MEDIUM' },
+  'gemini-4-hydrogen-high': { maxOutputTokens: 262_144, modelEnum: 'MODEL_PLACEHOLDER_M525', thinkingLevel: 'HIGH' },
+  'gemini-4-hydrogen-xhigh': { maxOutputTokens: 262_144, modelEnum: 'MODEL_PLACEHOLDER_M528', thinkingLevel: 'XHIGH' },
+  'gemini-4-carbon-low': { maxOutputTokens: 262_144, modelEnum: 'MODEL_PLACEHOLDER_M438', thinkingLevel: 'LOW' },
+  'gemini-4-carbon-medium': { maxOutputTokens: 262_144, modelEnum: 'MODEL_PLACEHOLDER_M437', thinkingLevel: 'MEDIUM' },
+  'gemini-4-carbon-high': { maxOutputTokens: 262_144, modelEnum: 'MODEL_PLACEHOLDER_M427', thinkingLevel: 'HIGH' },
+})
+
+function findExtraGemini4Family(modelId: string): ExtraGemini4FamilySpec | undefined {
+  const stripped = modelId.toLowerCase().replace(/^antigravity-/u, '')
+  return EXTRA_GEMINI4_FAMILIES.find(
+    family => stripped === family.wireBase || family.efforts.some(effort => stripped === `${family.wireBase}-${effort}`),
+  )
+}
+
+function getExtraGemini4WireSpec(wireModel: string): ExtraGemini4WireSpec | undefined {
+  const key = wireModel.toLowerCase()
+  return Object.hasOwn(EXTRA_GEMINI4_WIRE_SPECS, key) ? EXTRA_GEMINI4_WIRE_SPECS[key] : undefined
+}
+
+function buildPublicModelDefinitions(): ReturnType<typeof getPublicModelDefinitions> {
+  type PublicModelDefinitions = ReturnType<typeof getPublicModelDefinitions>
+  type PublicModelEntry = PublicModelDefinitions[string]
+  type PublicVariants = NonNullable<PublicModelEntry['variants']>
+
+  const extraDefinitions: Record<string, PublicModelEntry> = {}
+  for (const family of EXTRA_GEMINI4_FAMILIES) {
+    const variants: Record<string, { thinkingLevel: string }> = {}
+    for (const effort of family.efforts) {
+      variants[effort] = { thinkingLevel: effort }
+    }
+    extraDefinitions[family.publicId] = {
+      id: family.publicId,
+      name: family.displayName,
+      release_date: '',
+      attachment: true,
+      reasoning: true,
+      temperature: true,
+      tool_call: true,
+      cost: { input: 0, output: 0 },
+      options: {},
+      limit: { context: family.contextWindow, output: family.maxOutputTokens },
+      modalities: { input: ['text', 'image', 'pdf'], output: ['text'] },
+      variants: variants as PublicVariants,
+    }
+  }
+  return {
+    ...extraDefinitions,
+    ...getPublicModelDefinitions(),
+  }
+}
+
 function cleanModelDisplayName(name: string): string {
   return name.replace(/\s*\([^)]*\)\s*$/u, '').trim()
 }
 
 function getModelReasoningEfforts(modelId: string): { efforts: readonly { id: ReturnType<typeof ReasoningEffortId>; name: string }[]; defaultEffort: ReturnType<typeof ReasoningEffortId> } | undefined {
+  const extraFamily = findExtraGemini4Family(modelId)
+  if (extraFamily !== undefined) {
+    return {
+      efforts: extraFamily.efforts.map(effort => ({
+        id: ReasoningEffortId(effort),
+        name: EFFORT_LABELS[effort],
+      })),
+      defaultEffort: ReasoningEffortId(extraFamily.defaultEffort),
+    }
+  }
   const lower = modelId.toLowerCase()
   if (lower.includes('gemini-4-argon') || (lower.includes('flash') && !lower.includes('image'))) {
     return {
@@ -691,6 +803,13 @@ function parseLiveModelIds(
   for (const [id, rawEntry] of entries) {
     if (!safeModelId(id) || !isRecord(rawEntry)) throw new LlmError('The Antigravity live model catalog did not match the audited schema', 'PROTOCOL_DRIFT')
     const cleanId = cleanModelId(id)
+    if (rawEntry.modelName !== undefined && typeof rawEntry.modelName === 'string') {
+      if (!safeModelId(rawEntry.modelName)) throw new LlmError('The Antigravity live model catalog did not match the audited schema', 'PROTOCOL_DRIFT')
+    }
+    if (rawEntry.displayName !== undefined && (typeof rawEntry.displayName !== 'string' || rawEntry.displayName.length > 512 || containsControl(rawEntry.displayName))) {
+      throw new LlmError('The Antigravity live model catalog did not match the audited schema', 'PROTOCOL_DRIFT')
+    }
+    if (rawEntry.disabled === true || cleanId.endsWith('-disabled')) continue
     live.add(canonicalWireModel(cleanId, aliases))
     live.add(cleanId)
     live.add(id)
@@ -712,6 +831,14 @@ function parseLiveModelIds(
       live.add('gemini-4-argon-medium')
       live.add('gemini-4-argon-high')
     }
+    for (const family of EXTRA_GEMINI4_FAMILIES) {
+      if (cleanId === family.wireBase || cleanId.startsWith(`${family.wireBase}-`)) {
+        live.add(family.wireBase)
+        for (const effort of family.efforts) {
+          live.add(`${family.wireBase}-${effort}`)
+        }
+      }
+    }
     if (cleanId.startsWith('claude-sonnet-5-5')) {
       live.add('claude-sonnet-5-5')
       live.add('claude-sonnet-5-5-low')
@@ -725,18 +852,14 @@ function parseLiveModelIds(
       live.add('claude-opus-5-5-high')
     }
     if (rawEntry.modelName !== undefined && typeof rawEntry.modelName === 'string') {
-      if (!safeModelId(rawEntry.modelName)) throw new LlmError('The Antigravity live model catalog did not match the audited schema', 'PROTOCOL_DRIFT')
       const cleanName = cleanModelId(rawEntry.modelName)
       live.add(canonicalWireModel(cleanName, aliases))
       live.add(cleanName)
     }
-    if (rawEntry.displayName !== undefined && (typeof rawEntry.displayName !== 'string' || rawEntry.displayName.length > 512 || containsControl(rawEntry.displayName))) {
-      throw new LlmError('The Antigravity live model catalog did not match the audited schema', 'PROTOCOL_DRIFT')
-    }
   }
   const available = new Set<string>()
   for (const definition of Object.values(definitions)) {
-    const resolved = resolveModelWithTier(definition.id).actualModel
+    const resolved = resolveWireModel(definition.id)
     const cleanResolved = cleanModelId(resolved)
     const canonical = canonicalWireModel(cleanResolved, aliases)
     if (
@@ -1002,10 +1125,14 @@ async function buildAntigravityGeneratePayloadForAdapter(
     if (message.role === 'system') continue
     contents.push(await mapMessageWithAttachments(message, options.model, toolNames, attachments, options.signal, sentImageBytes))
   }
+  const wireModel = resolveWireModel(options.model, options.reasoningEffort)
   const payload = buildPayloadFromContents(options, credential, contents)
-  const metadata = buildAgyAgentRequestMetadata(session, payload.request as Record<string, unknown>, resolveWireModel(options.model, options.reasoningEffort), timestamp)
+  const metadata = buildAgyAgentRequestMetadata(session, payload.request as Record<string, unknown>, wireModel, timestamp)
+  const extraWireSpec = getExtraGemini4WireSpec(wireModel)
   const request = payload.request as Record<string, unknown>
-  request.labels = metadata.labels
+  request.labels = metadata.labels.model_enum === undefined && extraWireSpec !== undefined
+    ? { ...metadata.labels, model_enum: extraWireSpec.modelEnum }
+    : metadata.labels
   request.sessionId = metadata.sessionId
   orderAgyRequestPayloadInPlace(request)
   return {
@@ -1078,9 +1205,12 @@ function buildPayloadFromContents(
   const tieredModel = resolveModelForTier(options.model, options.reasoningEffort)
   const resolved = resolveModelWithTier(usesCapturedGemini38ThinkingBudget ? wireModel : tieredModel)
   const nativeModel = getAgyNativeModel(wireModel)
-  const usesAdaptiveNativeThinking = isGeminiArgonModel(wireModel) || nativeModel?.supportsAdaptiveThinking === true
+  const extraWireSpec = getExtraGemini4WireSpec(wireModel)
+  const usesAdaptiveNativeThinking = isGeminiArgonModel(wireModel)
+    || nativeModel?.supportsAdaptiveThinking === true
+    || extraWireSpec !== undefined
   const usesNumericGeminiThinkingBudget = !wireModel.toLowerCase().includes('claude') && !usesAdaptiveNativeThinking && typeof resolved.thinkingBudget === 'number'
-  const requestedEffort = normalizeReasoningEffort(options.reasoningEffort)
+  const requestedEffort = resolveEffortForModel(options.model, options.reasoningEffort)
   const thinkingLevel = requestedEffort ?? resolved.thinkingLevel
   if (wireModel.toLowerCase().includes('claude')) {
     applyClaudeToolHardening(request)
@@ -1104,7 +1234,17 @@ function buildPayloadFromContents(
     })
     if (usesAdaptiveNativeThinking) {
       const transformedConfig = isRecord(request.generationConfig) ? request.generationConfig : {}
-      applyAgyNativeGenerationConfig(wireModel, transformedConfig)
+      if (extraWireSpec !== undefined) {
+        if (transformedConfig.maxOutputTokens === undefined) {
+          transformedConfig.maxOutputTokens = extraWireSpec.maxOutputTokens
+        }
+        transformedConfig.thinkingConfig = {
+          includeThoughts: true,
+          thinkingLevel: extraWireSpec.thinkingLevel,
+        }
+      } else {
+        applyAgyNativeGenerationConfig(wireModel, transformedConfig)
+      }
       request.generationConfig = transformedConfig
     } else if (usesNumericGeminiThinkingBudget && typeof resolved.thinkingBudget === 'number') {
       const transformedConfig = isRecord(request.generationConfig) ? request.generationConfig : {}
@@ -1504,18 +1644,36 @@ function requireToolCallId(value: unknown): string {
   return value
 }
 
-function normalizeReasoningEffort(value: GenerateOptions['reasoningEffort']): 'low' | 'medium' | 'high' | undefined {
+function normalizeReasoningEffort(value: GenerateOptions['reasoningEffort']): Gemini4ExtraEffort | undefined {
   if (value === undefined) return undefined
   const normalized = String(value).toLowerCase()
   if (normalized === 'minimal' || normalized === 'low') return 'low'
   if (normalized === 'medium') return 'medium'
   if (normalized === 'high') return 'high'
+  if (normalized === 'xhigh') return 'xhigh'
   return undefined
 }
 
-function resolveModelForTier(model: string, reasoningEffort?: GenerateOptions['reasoningEffort']): string {
+function resolveEffortForModel(
+  model: string,
+  reasoningEffort?: GenerateOptions['reasoningEffort'],
+): Gemini4ExtraEffort | undefined {
   const effort = normalizeReasoningEffort(reasoningEffort)
-  if (effort === undefined || /-(?:minimal|low|medium|high)$/iu.test(model)) return model
+  if (effort === undefined) return undefined
+  const extraFamily = findExtraGemini4Family(model)
+  if (extraFamily !== undefined) {
+    return extraFamily.efforts.includes(effort) ? effort : undefined
+  }
+  return effort === 'xhigh' ? undefined : effort
+}
+
+function resolveModelForTier(model: string, reasoningEffort?: GenerateOptions['reasoningEffort']): string {
+  const effort = resolveEffortForModel(model, reasoningEffort)
+  if (effort === undefined || /-(?:minimal|low|medium|high|xhigh)$/iu.test(model)) return model
+  const extraFamily = findExtraGemini4Family(model)
+  if (extraFamily !== undefined) {
+    return `${model}-${effort}`
+  }
   if (
     /^(?:antigravity-)?gemini-3\.[58]-flash$/iu.test(model)
     || /^(?:antigravity-)?gemini-4-argon$/iu.test(model)
@@ -1527,6 +1685,13 @@ function resolveModelForTier(model: string, reasoningEffort?: GenerateOptions['r
 }
 
 function resolveWireModel(model: string, reasoningEffort?: GenerateOptions['reasoningEffort']): string {
+  const extraFamily = findExtraGemini4Family(model)
+  if (extraFamily !== undefined) {
+    const stripped = model.toLowerCase().replace(/^antigravity-/u, '')
+    if (getExtraGemini4WireSpec(stripped) !== undefined) return stripped
+    const effort = resolveEffortForModel(model, reasoningEffort) ?? extraFamily.defaultEffort
+    return `${extraFamily.wireBase}-${effort}`
+  }
   const routeModel = resolveModelForTier(model, reasoningEffort)
   return resolveModelWithTier(routeModel).actualModel
 }

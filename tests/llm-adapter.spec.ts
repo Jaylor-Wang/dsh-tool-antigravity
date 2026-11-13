@@ -1344,4 +1344,180 @@ describe('Antigravity LLM adapter', () => {
       },
     })
   })
+
+  it('supports Gemini 4 Hydrogen (including xhigh) and Gemini 4 Carbon models', async () => {
+    const request = vi.fn(async (_input: PrivateTransportRequest) => new Response(
+      'data: {"response":{"parts":[{"text":"ok"}],"finishReason":"STOP"}}\n\n',
+    ))
+    const adapter = new AntigravityAdapter({
+      auth: { credential: vi.fn(async () => credential('access')) },
+      transport: { request },
+    })
+
+    await expect(adapter.resolveModel(ANTIGRAVITY_PROVIDER, 'antigravity-gemini-4-hydrogen')).resolves.toMatchObject({
+      id: 'antigravity-gemini-4-hydrogen',
+      name: 'Gemini 4 Hydrogen',
+      context: { contextWindow: 1048576 },
+      defaultMaxTokens: 262144,
+      reasoning: {
+        defaultEffort: ReasoningEffortId('high'),
+        efforts: [
+          { id: ReasoningEffortId('low'), name: 'Low' },
+          { id: ReasoningEffortId('medium'), name: 'Medium' },
+          { id: ReasoningEffortId('high'), name: 'High' },
+          { id: ReasoningEffortId('xhigh'), name: 'XHigh' },
+        ],
+      },
+    })
+
+    await expect(adapter.resolveModel(ANTIGRAVITY_PROVIDER, 'antigravity-gemini-4-carbon')).resolves.toMatchObject({
+      id: 'antigravity-gemini-4-carbon',
+      name: 'Gemini 4 Carbon',
+      context: { contextWindow: 1048576 },
+      defaultMaxTokens: 262144,
+      reasoning: {
+        defaultEffort: ReasoningEffortId('medium'),
+        efforts: [
+          { id: ReasoningEffortId('low'), name: 'Low' },
+          { id: ReasoningEffortId('medium'), name: 'Medium' },
+          { id: ReasoningEffortId('high'), name: 'High' },
+        ],
+      },
+    })
+
+    const hydrogenCases = [
+      { effort: undefined, wireModel: 'gemini-4-hydrogen-high', thinkingLevel: 'HIGH', modelEnum: 'MODEL_PLACEHOLDER_M525' },
+      { effort: 'low', wireModel: 'gemini-4-hydrogen-low', thinkingLevel: 'LOW', modelEnum: 'MODEL_PLACEHOLDER_M527' },
+      { effort: 'medium', wireModel: 'gemini-4-hydrogen-medium', thinkingLevel: 'MEDIUM', modelEnum: 'MODEL_PLACEHOLDER_M526' },
+      { effort: 'high', wireModel: 'gemini-4-hydrogen-high', thinkingLevel: 'HIGH', modelEnum: 'MODEL_PLACEHOLDER_M525' },
+      { effort: 'xhigh', wireModel: 'gemini-4-hydrogen-xhigh', thinkingLevel: 'XHIGH', modelEnum: 'MODEL_PLACEHOLDER_M528' },
+    ] as const
+    for (const item of hydrogenCases) {
+      const payload = buildAntigravityGeneratePayload(
+        options({
+          model: 'antigravity-gemini-4-hydrogen',
+          ...(item.effort === undefined ? {} : { reasoningEffort: ReasoningEffortId(item.effort) }),
+        }),
+        credential('access'),
+      )
+      expect(payload.model).toBe(item.wireModel)
+      expect((payload.request as { generationConfig: unknown }).generationConfig).toEqual({
+        maxOutputTokens: 262144,
+        thinkingConfig: {
+          includeThoughts: true,
+          thinkingLevel: item.thinkingLevel,
+        },
+      })
+    }
+
+    const cappedPayload = buildAntigravityGeneratePayload(
+      options({
+        model: 'antigravity-gemini-4-hydrogen',
+        reasoningEffort: ReasoningEffortId('xhigh'),
+        maxTokens: 8192,
+      }),
+      credential('access'),
+    )
+    expect((cappedPayload.request as { generationConfig: unknown }).generationConfig).toEqual({
+      maxOutputTokens: 8192,
+      thinkingConfig: {
+        includeThoughts: true,
+        thinkingLevel: 'XHIGH',
+      },
+    })
+
+    const carbonDefaultPayload = buildAntigravityGeneratePayload(
+      options({ model: 'antigravity-gemini-4-carbon' }),
+      credential('access'),
+    )
+    expect(carbonDefaultPayload.model).toBe('gemini-4-carbon-medium')
+    expect((carbonDefaultPayload.request as { generationConfig: unknown }).generationConfig).toEqual({
+      maxOutputTokens: 262144,
+      thinkingConfig: {
+        includeThoughts: true,
+        thinkingLevel: 'MEDIUM',
+      },
+    })
+
+    // Unsupported xhigh on Argon or Carbon safely falls back to the model default tier.
+    expect(buildAntigravityGeneratePayload(
+      options({ model: 'antigravity-gemini-4-argon', reasoningEffort: ReasoningEffortId('xhigh') }),
+      credential('access'),
+    ).model).toBe('gemini-4-argon-medium')
+    expect(buildAntigravityGeneratePayload(
+      options({ model: 'antigravity-gemini-4-carbon', reasoningEffort: ReasoningEffortId('xhigh') }),
+      credential('access'),
+    ).model).toBe('gemini-4-carbon-medium')
+
+    await collectThroughRuntime(adapter, options({
+      model: 'antigravity-gemini-4-hydrogen',
+      reasoningEffort: ReasoningEffortId('xhigh'),
+    }))
+    await collectThroughRuntime(adapter, options({
+      model: 'antigravity-gemini-4-carbon',
+      reasoningEffort: ReasoningEffortId('high'),
+    }))
+
+    const hydrogenWire = JSON.parse(String(request.mock.calls[0]?.[0].body))
+    expect(hydrogenWire).toMatchObject({
+      model: 'gemini-4-hydrogen-xhigh',
+      userAgent: 'antigravity',
+      requestType: 'agent',
+      request: {
+        labels: { model_enum: 'MODEL_PLACEHOLDER_M528' },
+        generationConfig: {
+          maxOutputTokens: 262144,
+          thinkingConfig: { includeThoughts: true, thinkingLevel: 'XHIGH' },
+        },
+      },
+    })
+
+    const carbonWire = JSON.parse(String(request.mock.calls[1]?.[0].body))
+    expect(carbonWire).toMatchObject({
+      model: 'gemini-4-carbon-high',
+      userAgent: 'antigravity',
+      requestType: 'agent',
+      request: {
+        labels: { model_enum: 'MODEL_PLACEHOLDER_M427' },
+        generationConfig: {
+          maxOutputTokens: 262144,
+          thinkingConfig: { includeThoughts: true, thinkingLevel: 'HIGH' },
+        },
+      },
+    })
+  })
+
+  it('excludes disabled live entries and surfaces active Gemini 4 Hydrogen / Carbon in modelCatalog', async () => {
+    const adapterWithDisabledCarbon = new AntigravityAdapter({
+      auth: { credential: vi.fn(async () => credential('access')) },
+      transport: {
+        request: vi.fn(async () => new Response(JSON.stringify({
+          models: {
+            'gemini-4-hydrogen-xhigh': { displayName: 'Gemini 4 Hydrogen (XHigh)' },
+            'gemini-4-carbon-disabled': { displayName: 'Gemini 4 Carbon', disabled: true },
+          },
+        }))),
+      },
+    })
+
+    const availableIds = (await adapterWithDisabledCarbon.listModels(ANTIGRAVITY_PROVIDER)).map(model => model.id)
+    expect(availableIds).toEqual(['antigravity-gemini-4-hydrogen'])
+
+    const catalog = await adapterWithDisabledCarbon.modelCatalog(undefined, true)
+    expect(catalog.models.find(model => model.id === 'antigravity-gemini-4-hydrogen')?.state).toBe('live-available')
+    expect(catalog.models.find(model => model.id === 'antigravity-gemini-4-carbon')?.state).toBe('unavailable')
+
+    const adapterWithEnabledCarbon = new AntigravityAdapter({
+      auth: { credential: vi.fn(async () => credential('access')) },
+      transport: {
+        request: vi.fn(async () => new Response(JSON.stringify({
+          models: {
+            'gemini-4-carbon-medium': { displayName: 'Gemini 4 Carbon (Medium)' },
+          },
+        }))),
+      },
+    })
+    expect((await adapterWithEnabledCarbon.listModels(ANTIGRAVITY_PROVIDER)).map(model => model.id))
+      .toEqual(['antigravity-gemini-4-carbon'])
+  })
 })
