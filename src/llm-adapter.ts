@@ -118,10 +118,12 @@ export interface AntigravityAdapterOptions {
   readonly catalogCachePath?: string
 }
 
+type WireThinkingLevel = 'LOW' | 'MEDIUM' | 'HIGH'
+
 interface DynamicWireSpec {
   readonly maxOutputTokens?: number
   readonly modelEnum?: string
-  readonly thinkingLevel?: 'LOW' | 'MEDIUM' | 'HIGH' | 'XHIGH'
+  readonly thinkingLevel?: WireThinkingLevel
   readonly supportsThinking?: boolean
 }
 
@@ -786,7 +788,7 @@ type Gemini4ExtraEffort = 'low' | 'medium' | 'high' | 'xhigh'
 interface ExtraGemini4WireSpec {
   readonly maxOutputTokens: number
   readonly modelEnum: string
-  readonly thinkingLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'XHIGH'
+  readonly thinkingLevel: WireThinkingLevel
 }
 
 interface ExtraGemini4FamilySpec {
@@ -833,7 +835,9 @@ const EXTRA_GEMINI4_WIRE_SPECS: Readonly<Record<string, ExtraGemini4WireSpec>> =
   'gemini-4-hydrogen-low': { maxOutputTokens: 262_144, modelEnum: 'MODEL_PLACEHOLDER_M527', thinkingLevel: 'LOW' },
   'gemini-4-hydrogen-medium': { maxOutputTokens: 262_144, modelEnum: 'MODEL_PLACEHOLDER_M526', thinkingLevel: 'MEDIUM' },
   'gemini-4-hydrogen-high': { maxOutputTokens: 262_144, modelEnum: 'MODEL_PLACEHOLDER_M525', thinkingLevel: 'HIGH' },
-  'gemini-4-hydrogen-xhigh': { maxOutputTokens: 262_144, modelEnum: 'MODEL_PLACEHOLDER_M528', thinkingLevel: 'XHIGH' },
+  // Live v1internal rejects `THINKING_LEVEL_XHIGH` (HTTP 400 INVALID_ARGUMENT) on coding-agent system prompts
+  // and drops `EXTRA_HIGH` / omitted level to zero thoughts; keep the M528 wire model with `'HIGH'` thinking.
+  'gemini-4-hydrogen-xhigh': { maxOutputTokens: 262_144, modelEnum: 'MODEL_PLACEHOLDER_M528', thinkingLevel: 'HIGH' },
   'gemini-4-carbon-low': { maxOutputTokens: 262_144, modelEnum: 'MODEL_PLACEHOLDER_M438', thinkingLevel: 'LOW' },
   'gemini-4-carbon-medium': { maxOutputTokens: 262_144, modelEnum: 'MODEL_PLACEHOLDER_M437', thinkingLevel: 'MEDIUM' },
   'gemini-4-carbon-high': { maxOutputTokens: 262_144, modelEnum: 'MODEL_PLACEHOLDER_M427', thinkingLevel: 'HIGH' },
@@ -1267,20 +1271,43 @@ function positiveBoundedInt(value: unknown, fallback: number, max: number): numb
     : fallback
 }
 
-function extractDynamicWireSpec(rawEntry: Record<string, unknown>, effort: Gemini4ExtraEffort | undefined): DynamicWireSpec | undefined {
-  const modelEnum = typeof rawEntry.model === 'string' && rawEntry.model.length > 0 && rawEntry.model.length <= 256 && !containsControl(rawEntry.model)
-    ? rawEntry.model
+function normalizeWireThinkingLevel(
+  raw: unknown,
+  effort?: Gemini4ExtraEffort,
+): WireThinkingLevel | undefined {
+  // Server `fetchAvailableModels` encodes thinking levels numerically (`1=LOW, 2=MEDIUM, 3=HIGH, 4=MINIMAL, 5|100=EXTRA_HIGH, 200=MAX`).
+  // Map tiers above HIGH onto `'HIGH'` to match @cortexkit/antigravity-auth-core's adaptive ceiling and avoid v1internal HTTP 400 on `THINKING_LEVEL_XHIGH`.
+  if (typeof raw === 'number' && Number.isSafeInteger(raw)) {
+    if (raw === 1 || raw === 4) return 'LOW'
+    if (raw === 2) return 'MEDIUM'
+    if (raw === 3 || raw === 5 || raw === 100 || raw === 200) return 'HIGH'
+  } else if (typeof raw === 'string') {
+    const upper = raw.trim().toUpperCase()
+    if (upper === 'LOW' || upper === 'MINIMAL') return 'LOW'
+    if (upper === 'MEDIUM') return 'MEDIUM'
+    if (upper === 'HIGH' || upper === 'XHIGH' || upper === 'EXTRA_HIGH' || upper === 'MAX') return 'HIGH'
+  }
+  if (effort === 'low') return 'LOW'
+  if (effort === 'medium') return 'MEDIUM'
+  if (effort === 'high' || effort === 'xhigh') return 'HIGH'
+  return undefined
+}
+
+function sanitizeDynamicWireSpec(
+  rawEnum: unknown,
+  rawMaxOutputTokens: unknown,
+  rawThinkingLevel: unknown,
+  rawSupportsThinking: unknown,
+  effort?: Gemini4ExtraEffort,
+): DynamicWireSpec | undefined {
+  const modelEnum = typeof rawEnum === 'string' && rawEnum.length > 0 && rawEnum.length <= 256 && !containsControl(rawEnum)
+    ? rawEnum
     : undefined
-  const maxOutputTokens = typeof rawEntry.maxOutputTokens === 'number' && Number.isSafeInteger(rawEntry.maxOutputTokens) && rawEntry.maxOutputTokens > 0 && rawEntry.maxOutputTokens <= 1_000_000
-    ? rawEntry.maxOutputTokens
+  const maxOutputTokens = typeof rawMaxOutputTokens === 'number' && Number.isSafeInteger(rawMaxOutputTokens) && rawMaxOutputTokens > 0 && rawMaxOutputTokens <= 1_000_000
+    ? rawMaxOutputTokens
     : undefined
-  const rawThinkingLevel = typeof rawEntry.thinkingLevel === 'string' ? rawEntry.thinkingLevel.toUpperCase() : undefined
-  const thinkingLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'XHIGH' | undefined = rawThinkingLevel === 'LOW' || rawThinkingLevel === 'MEDIUM' || rawThinkingLevel === 'HIGH' || rawThinkingLevel === 'XHIGH'
-    ? rawThinkingLevel
-    : effort === undefined
-      ? undefined
-      : (effort.toUpperCase() as 'LOW' | 'MEDIUM' | 'HIGH' | 'XHIGH')
-  const supportsThinking = typeof rawEntry.supportsThinking === 'boolean' ? rawEntry.supportsThinking : undefined
+  const thinkingLevel = normalizeWireThinkingLevel(rawThinkingLevel, effort)
+  const supportsThinking = typeof rawSupportsThinking === 'boolean' ? rawSupportsThinking : undefined
   if (modelEnum === undefined && maxOutputTokens === undefined && thinkingLevel === undefined && supportsThinking === undefined) {
     return undefined
   }
@@ -1290,6 +1317,36 @@ function extractDynamicWireSpec(rawEntry: Record<string, unknown>, effort: Gemin
     ...(thinkingLevel === undefined ? {} : { thinkingLevel }),
     ...(supportsThinking === undefined ? {} : { supportsThinking }),
   }
+}
+
+function extractDynamicWireSpec(rawEntry: Record<string, unknown>, effort: Gemini4ExtraEffort | undefined): DynamicWireSpec | undefined {
+  return sanitizeDynamicWireSpec(
+    rawEntry.model,
+    rawEntry.maxOutputTokens,
+    rawEntry.thinkingLevel,
+    rawEntry.supportsThinking,
+    effort,
+  )
+}
+
+function sanitizePersistedWireSpecs(value: unknown): Record<string, DynamicWireSpec> {
+  if (!isRecord(value)) return {}
+  const output: Record<string, DynamicWireSpec> = {}
+  let count = 0
+  for (const [key, rawSpec] of Object.entries(value)) {
+    if (count >= 128 || !safeModelId(key) || !isRecord(rawSpec)) continue
+    const normalized = sanitizeDynamicWireSpec(
+      rawSpec.modelEnum,
+      rawSpec.maxOutputTokens,
+      rawSpec.thinkingLevel,
+      rawSpec.supportsThinking,
+    )
+    if (normalized !== undefined) {
+      output[key.toLowerCase()] = normalized
+      count += 1
+    }
+  }
+  return output
 }
 
 function matchesStaticDefinition(
@@ -1338,9 +1395,7 @@ function parsePersistedCatalogFile(value: unknown): Record<string, CachedLiveCat
     const dynamicDefinitions = isRecord(rawAccount.dynamicDefinitions)
       ? rawAccount.dynamicDefinitions as Record<string, ReturnType<typeof getPublicModelDefinitions>[string]>
       : {}
-    const dynamicWireSpecs = isRecord(rawAccount.dynamicWireSpecs)
-      ? rawAccount.dynamicWireSpecs as Record<string, DynamicWireSpec>
-      : {}
+    const dynamicWireSpecs = sanitizePersistedWireSpecs(rawAccount.dynamicWireSpecs)
     const modelBaseByPublicId = isRecord(rawAccount.modelBaseByPublicId)
       ? rawAccount.modelBaseByPublicId as Record<string, string>
       : {}

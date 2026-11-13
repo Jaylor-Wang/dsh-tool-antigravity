@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -1393,7 +1393,7 @@ describe('Antigravity LLM adapter', () => {
       { effort: 'low', wireModel: 'gemini-4-hydrogen-low', thinkingLevel: 'LOW', modelEnum: 'MODEL_PLACEHOLDER_M527' },
       { effort: 'medium', wireModel: 'gemini-4-hydrogen-medium', thinkingLevel: 'MEDIUM', modelEnum: 'MODEL_PLACEHOLDER_M526' },
       { effort: 'high', wireModel: 'gemini-4-hydrogen-high', thinkingLevel: 'HIGH', modelEnum: 'MODEL_PLACEHOLDER_M525' },
-      { effort: 'xhigh', wireModel: 'gemini-4-hydrogen-xhigh', thinkingLevel: 'XHIGH', modelEnum: 'MODEL_PLACEHOLDER_M528' },
+      { effort: 'xhigh', wireModel: 'gemini-4-hydrogen-xhigh', thinkingLevel: 'HIGH', modelEnum: 'MODEL_PLACEHOLDER_M528' },
     ] as const
     for (const item of hydrogenCases) {
       const payload = buildAntigravityGeneratePayload(
@@ -1425,7 +1425,7 @@ describe('Antigravity LLM adapter', () => {
       maxOutputTokens: 8192,
       thinkingConfig: {
         includeThoughts: true,
-        thinkingLevel: 'XHIGH',
+        thinkingLevel: 'HIGH',
       },
     })
 
@@ -1470,7 +1470,7 @@ describe('Antigravity LLM adapter', () => {
         labels: { model_enum: 'MODEL_PLACEHOLDER_M528' },
         generationConfig: {
           maxOutputTokens: 262144,
-          thinkingConfig: { includeThoughts: true, thinkingLevel: 'XHIGH' },
+          thinkingConfig: { includeThoughts: true, thinkingLevel: 'HIGH' },
         },
       },
     })
@@ -1543,6 +1543,7 @@ describe('Antigravity LLM adapter', () => {
               'gemini-4-neon-xhigh': {
                 displayName: 'Gemini 4 Neon (XHigh)',
                 model: 'MODEL_PLACEHOLDER_M602',
+                thinkingLevel: 100,
                 maxTokens: 2_000_000,
                 maxOutputTokens: 131_072,
                 supportsImages: true,
@@ -1604,7 +1605,7 @@ describe('Antigravity LLM adapter', () => {
         labels: { model_enum: 'MODEL_PLACEHOLDER_M602' },
         generationConfig: {
           maxOutputTokens: 131_072,
-          thinkingConfig: { includeThoughts: true, thinkingLevel: 'XHIGH' },
+          thinkingConfig: { includeThoughts: true, thinkingLevel: 'HIGH' },
         },
       },
     })
@@ -1664,6 +1665,81 @@ describe('Antigravity LLM adapter', () => {
       const afterClear = await restartedAdapter.modelCatalog()
       expect(afterClear.state).toBe('refresh-failed')
       expect(afterClear.cached).toBeUndefined()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('normalizes stale persisted XHIGH wire specs to HIGH across restarts when refresh fails', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-antigravity-stale-xhigh-'))
+    const cachePath = join(dir, 'model-catalog.json')
+    try {
+      const seedAdapter = new AntigravityAdapter({
+        auth: { credential: vi.fn(async () => credential('access')) },
+        catalogCachePath: cachePath,
+        transport: {
+          request: vi.fn(async () => new Response(JSON.stringify({
+            models: {
+              'gemini-4-neon-xhigh': {
+                displayName: 'Gemini 4 Neon (XHigh)',
+                model: 'MODEL_PLACEHOLDER_M602',
+                thinkingLevel: 100,
+                maxTokens: 2_000_000,
+                maxOutputTokens: 131_072,
+                supportsImages: true,
+                supportsThinking: true,
+              },
+            },
+          }))),
+        },
+      })
+      await seedAdapter.listModels(ANTIGRAVITY_PROVIDER)
+
+      // Simulate an older cache file persisted with legacy `thinkingLevel: "XHIGH"`.
+      const cached = JSON.parse(await readFile(cachePath, 'utf8')) as {
+        accounts: Record<string, { dynamicWireSpecs?: Record<string, { thinkingLevel?: string }> }>
+      }
+      for (const account of Object.values(cached.accounts)) {
+        if (account.dynamicWireSpecs?.['gemini-4-neon-xhigh']) {
+          account.dynamicWireSpecs['gemini-4-neon-xhigh'].thinkingLevel = 'XHIGH'
+        }
+      }
+      await writeFile(cachePath, JSON.stringify(cached), 'utf8')
+
+      const transportCalls: Array<{ url: string; body: Record<string, unknown> }> = []
+      const restartedAdapter = new AntigravityAdapter({
+        auth: { credential: vi.fn(async () => credential('access')) },
+        catalogCachePath: cachePath,
+        transport: {
+          request: vi.fn(async ({ url, body }: PrivateTransportRequest) => {
+            transportCalls.push({ url, body: JSON.parse(typeof body === 'string' ? body : '{}') as Record<string, unknown> })
+            if (url.endsWith(':fetchAvailableModels')) {
+              return new Response('', { status: 429 })
+            }
+            return new Response('data: {"response":{"parts":[{"text":"cached-neon-ok"}],"finishReason":"STOP"}}\n\ndata: [DONE]\n\n')
+          }),
+        },
+      })
+
+      const chunks = await collectThroughRuntime(restartedAdapter, {
+        provider: ANTIGRAVITY_PROVIDER,
+        model: 'antigravity-gemini-4-neon',
+        messages: [message('hello')],
+        reasoningEffort: ReasoningEffortId('xhigh'),
+        signal: new AbortController().signal,
+      })
+      expect(chunks.some(chunk => chunk.type === 'text-delta' && chunk.text === 'cached-neon-ok')).toBe(true)
+      const generateCall = transportCalls.find(call => !call.url.endsWith(':fetchAvailableModels'))
+      expect(generateCall?.body).toMatchObject({
+        model: 'gemini-4-neon-xhigh',
+        request: {
+          labels: { model_enum: 'MODEL_PLACEHOLDER_M602' },
+          generationConfig: {
+            maxOutputTokens: 131_072,
+            thinkingConfig: { includeThoughts: true, thinkingLevel: 'HIGH' },
+          },
+        },
+      })
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
