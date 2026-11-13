@@ -15,6 +15,7 @@ import {
   getPublicModelDefinitions,
   getResolverAliasMap,
   isGeminiArgonModel,
+  isGeminiCarbonModel,
   orderAgyRequestPayloadInPlace,
   resolveModelWithTier,
   toGeminiSchema,
@@ -155,6 +156,8 @@ export class AntigravityAdapter extends LlmAdapter {
   private catalogModelIds = new Set<string>()
   private catalogFailureCode: string | undefined
   private catalogView: AntigravityModelCatalogView
+  private readonly catalogByAccount = new Map<string, { expiresAt: number; modelIds: ReadonlySet<string>; failureCode?: string | undefined }>()
+  private readonly lastLiveByAccount = new Map<string, ReadonlySet<string>>()
 
   constructor(private readonly adapterOptions: AntigravityAdapterOptions) {
     super()
@@ -190,11 +193,16 @@ export class AntigravityAdapter extends LlmAdapter {
   }
 
   /** Forget account-bound availability when Gate 0 or the credential is replaced. */
-  invalidateModelCatalog(): void {
+  invalidateModelCatalog(accountKey?: string): void {
     this.catalogProjectId = undefined
     this.catalogExpiresAt = 0
     this.catalogModelIds = new Set<string>()
     this.catalogFailureCode = undefined
+    if (accountKey) {
+      this.catalogByAccount.delete(accountKey)
+    } else {
+      this.catalogByAccount.clear()
+    }
     this.catalogView = createCatalogView(this.definitions, 'snapshot')
   }
 
@@ -492,9 +500,16 @@ export class AntigravityAdapter extends LlmAdapter {
   ): Promise<ReadonlySet<string>> {
     const credential = await this.readCredential(signal, forceCredentialRefresh)
     if (credential === undefined) throw new LlmError('Antigravity login is required before model discovery', 'AUTH')
-    if (!bypassCache && this.catalogProjectId === credential.projectId && Date.now() < this.catalogExpiresAt) {
-      if (this.catalogFailureCode !== undefined) throw new LlmError('The Antigravity live model catalog refresh remains unavailable', this.catalogFailureCode)
-      return this.catalogModelIds
+    const credAny = credential as unknown as Record<string, unknown>
+    const accountKey = (typeof credAny.lineage === 'string' && credAny.lineage)
+      || (typeof credAny.email === 'string' && credAny.email)
+      || (typeof credAny.id === 'string' && credAny.id)
+      || credential.projectId
+      || 'default'
+    const cached = this.catalogByAccount.get(accountKey)
+    if (!bypassCache && cached !== undefined && Date.now() < cached.expiresAt) {
+      if (cached.failureCode !== undefined) throw new LlmError('The Antigravity live model catalog refresh remains unavailable', cached.failureCode)
+      return cached.modelIds
     }
     let response: Response
     const body = credential.projectId ? { project: credential.projectId } : {}
@@ -508,7 +523,7 @@ export class AntigravityAdapter extends LlmAdapter {
       })
     } catch (error) {
       const failure = toModelCatalogError(error, signal, 'provider')
-      this.rememberCatalogFailure(credential.projectId, failure)
+      this.rememberCatalogFailure(accountKey, failure)
       throw failure
     }
     if (response.status === 403 && credential.projectId) {
@@ -530,7 +545,7 @@ export class AntigravityAdapter extends LlmAdapter {
         const failure = toModelCatalogError(error, signal, 'provider')
         if (failure.code === 'CANCELLED' || failure.code === 'GATE_0_ATTRIBUTION') {
           await cancelResponse(response)
-          this.rememberCatalogFailure(credential.projectId, failure)
+          this.rememberCatalogFailure(accountKey, failure)
           throw failure
         }
         // Keep the original project-scoped 403 as the authoritative failure.
@@ -540,11 +555,12 @@ export class AntigravityAdapter extends LlmAdapter {
     if (statusError !== undefined) {
       await cancelResponse(response)
       if (statusError.code === 'authentication' && !forceCredentialRefresh && !isAborted(signal)) {
+        this.catalogByAccount.delete(accountKey)
         this.catalogExpiresAt = 0
         return this.readLiveModelIds(signal, true, true)
       }
       const failure = toLlmError(statusError)
-      this.rememberCatalogFailure(credential.projectId, failure)
+      this.rememberCatalogFailure(accountKey, failure)
       throw failure
     }
     let value: unknown
@@ -557,7 +573,7 @@ export class AntigravityAdapter extends LlmAdapter {
       })) as unknown
     } catch (error) {
       const failure = toModelCatalogError(error, signal, 'protocol')
-      this.rememberCatalogFailure(credential.projectId, failure)
+      this.rememberCatalogFailure(accountKey, failure)
       throw failure
     }
     let ids: Set<string>
@@ -565,22 +581,32 @@ export class AntigravityAdapter extends LlmAdapter {
       const failure = error instanceof LlmError
         ? error
         : new LlmError('The Antigravity live model catalog did not match the audited schema', 'PROTOCOL_DRIFT')
-      this.rememberCatalogFailure(credential.projectId, failure)
+      this.rememberCatalogFailure(accountKey, failure)
       throw failure
     }
     this.catalogProjectId = credential.projectId
     this.catalogModelIds = ids
     this.catalogFailureCode = undefined
     this.catalogExpiresAt = Date.now() + MODEL_CATALOG_TTL_MS
+    this.catalogByAccount.set(accountKey, {
+      modelIds: ids,
+      expiresAt: Date.now() + MODEL_CATALOG_TTL_MS,
+    })
+    this.lastLiveByAccount.set(accountKey, ids)
     return ids
   }
 
-  private rememberCatalogFailure(projectId: string, failure: LlmError): void {
+  private rememberCatalogFailure(accountKey: string, failure: LlmError): void {
     if (failure.code === 'AUTH' || failure.code === 'CANCELLED') return
-    this.catalogProjectId = projectId
+    this.catalogProjectId = typeof accountKey === 'string' ? accountKey : undefined
     this.catalogModelIds = new Set<string>()
     this.catalogFailureCode = failure.code
     this.catalogExpiresAt = Date.now() + MODEL_CATALOG_TTL_MS
+    this.catalogByAccount.set(accountKey, {
+      modelIds: new Set<string>(),
+      failureCode: failure.code,
+      expiresAt: Date.now() + MODEL_CATALOG_TTL_MS,
+    })
   }
 
   private async readCredential(signal: AbortSignal | undefined, forceRefresh: boolean, family?: string): Promise<HostCredential | undefined> {
@@ -627,7 +653,7 @@ function cleanModelDisplayName(name: string): string {
 
 function getModelReasoningEfforts(modelId: string): { efforts: readonly { id: ReturnType<typeof ReasoningEffortId>; name: string }[]; defaultEffort: ReturnType<typeof ReasoningEffortId> } | undefined {
   const lower = modelId.toLowerCase()
-  if (lower.includes('gemini-4-argon') || (lower.includes('flash') && !lower.includes('image'))) {
+  if (lower.includes('gemini-4-argon') || lower.includes('gemini-4-carbon') || (lower.includes('flash') && !lower.includes('image'))) {
     return {
       efforts: [
         { id: ReasoningEffortId('low'), name: 'Low' },
@@ -635,7 +661,7 @@ function getModelReasoningEfforts(modelId: string): { efforts: readonly { id: Re
         { id: ReasoningEffortId('high'), name: 'High' },
       ],
       defaultEffort: ReasoningEffortId(
-        lower.includes('gemini-4-argon') || lower.includes('gemini-3.8-flash') ? 'medium' : 'high',
+        lower.includes('gemini-4-argon') || lower.includes('gemini-4-carbon') || lower.includes('gemini-3.8-flash') ? 'medium' : 'high',
       ),
     }
   }
@@ -711,6 +737,12 @@ function parseLiveModelIds(
       live.add('gemini-4-argon-low')
       live.add('gemini-4-argon-medium')
       live.add('gemini-4-argon-high')
+    }
+    if (cleanId.startsWith('gemini-4-carbon')) {
+      live.add('gemini-4-carbon')
+      live.add('gemini-4-carbon-low')
+      live.add('gemini-4-carbon-medium')
+      live.add('gemini-4-carbon-high')
     }
     if (cleanId.startsWith('claude-sonnet-5-5')) {
       live.add('claude-sonnet-5-5')
@@ -1078,7 +1110,7 @@ function buildPayloadFromContents(
   const tieredModel = resolveModelForTier(options.model, options.reasoningEffort)
   const resolved = resolveModelWithTier(usesCapturedGemini38ThinkingBudget ? wireModel : tieredModel)
   const nativeModel = getAgyNativeModel(wireModel)
-  const usesAdaptiveNativeThinking = isGeminiArgonModel(wireModel) || nativeModel?.supportsAdaptiveThinking === true
+  const usesAdaptiveNativeThinking = isGeminiArgonModel(wireModel) || isGeminiCarbonModel(wireModel) || nativeModel?.supportsAdaptiveThinking === true
   const usesNumericGeminiThinkingBudget = !wireModel.toLowerCase().includes('claude') && !usesAdaptiveNativeThinking && typeof resolved.thinkingBudget === 'number'
   const requestedEffort = normalizeReasoningEffort(options.reasoningEffort)
   const thinkingLevel = requestedEffort ?? resolved.thinkingLevel
@@ -1518,7 +1550,7 @@ function resolveModelForTier(model: string, reasoningEffort?: GenerateOptions['r
   if (effort === undefined || /-(?:minimal|low|medium|high)$/iu.test(model)) return model
   if (
     /^(?:antigravity-)?gemini-3\.[58]-flash$/iu.test(model)
-    || /^(?:antigravity-)?gemini-4-argon$/iu.test(model)
+    || /^(?:antigravity-)?gemini-4-(?:argon|carbon)$/iu.test(model)
     || /^(?:antigravity-)?claude-(?:opus|sonnet)-5-5$/iu.test(model)
   ) {
     return `${model}-${effort}`

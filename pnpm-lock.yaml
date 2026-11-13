@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@cortexkit/antigravity-auth-core':
-        specifier: 3.0.14
-        version: 3.0.14
+        specifier: 3.0.42
+        version: 3.0.42
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: 4.0.2
@@ -190,21 +190,24 @@ packages:
     resolution: {integrity: sha512-ctxtJ/eA+t+6q2++vj5j7FYX3nRu311q1wfYH3xjlLOsczhlhxAg2FWNUXhpGvAw3BWo1xBcvOV6/YLc2r5FJw==}
     hasBin: true
 
-  '@cortexkit/antigravity-auth-core@3.0.14':
-    resolution: {integrity: sha512-drNHr+y0S9UolUxfmKE0gcLY8ewBooqXdo+z5uEjdIZw/jWAjxBLilmMw/aOu2DUKG5Ho5WCkMk3z5TJoLE8lA==}
+  '@cortexkit/antigravity-auth-core@3.0.42':
+    resolution: {integrity: sha512-mDTzJvcNo7FZD9QF9hBhtzxFEKfm1r3/cN8uTCtnCiQ7jeKNZw4OHrXbF3wyPvG+e9WAXf6b1i6PQaHauYDPZQ==}
 
-  '@cortexkit/claustrum-client@0.12.0':
-    resolution: {integrity: sha512-Eqo2V8XgVzbZvolFYn11HX0TMRt21pnc9bWLYkcT4KW6kJ2fFLkzvXGzQ++MOmQpq8Bd3Jl5xA6yKkXTnimDOw==}
+  '@cortexkit/claustrum-client@0.18.0':
+    resolution: {integrity: sha512-tdRTrtnmOk3En1ZT1T+J+8NDwZl5FNxtN4w4Im2KV12QypPwyMi1ZBUXS2X4ZyDn4vPbHiOK8gjP+hQMsZ/V9g==}
 
   '@cortexkit/private-files@0.2.1':
     resolution: {integrity: sha512-U7ofFl45DDYScXo7vSV/4OPxn0xC1mflKpW8tbK8/3OaRd9q+TDEY25UWO8itXtSAlhBMqhZBZ3NxZNL5IyrSg==}
+
+  '@cortexkit/private-files@0.2.2':
+    resolution: {integrity: sha512-BdRxi4mzPkTUiZxKTlQV/RsESk5f34+sLk0qQLv1QlBQdkq2zw8yc0b3dm1qmZ5RfeChiBKEGgL6Qw31RCSaeA==}
 
   '@cortexkit/store@0.2.3':
     resolution: {integrity: sha512-cOCjAhb2rJp9u71xHXTlb2tS67237hHVN5DCB+aVh9S/FSu1UjOj8j/LjTSnVAZYXrNuWWb8eoQghiEcDtNT8g==}
     engines: {node: '>=18'}
 
-  '@cortexkit/subc-client@0.22.5':
-    resolution: {integrity: sha512-C3yw60RtmWDsG6wXtEBRA+T2ybUFbIjfaAnQmuf3HIlWniLOBWoYNwMVdcUORc3wxegE5vC58DFhA3VPJ9+aAw==}
+  '@cortexkit/subc-client@0.24.0':
+    resolution: {integrity: sha512-adx2FoWdJqqEyOOChX3I7SKOUhoxDohK1lCn6Kj4OQvB4jIKONJ/8MoCc/jDnRidoiOx+k+K/nZcybHMYbBc5Q==}
     engines: {node: '>=18'}
 
   '@csstools/color-helpers@6.1.1':
@@ -1095,6 +1098,9 @@ packages:
       canvas:
         optional: true
 
+  jsonc-parser@3.3.1:
+    resolution: {integrity: sha512-HUgH65KyejrUFPvHFPbqOY0rsFip3Bo5wb4ngvdi1EpCYWUQDC5V+Y7mZws+DLkr4M//zQJoanu1SP+87Dv1oQ==}
+
   lightningcss-android-arm64@1.33.0:
     resolution: {integrity: sha512-gEpRTalKdosp4Bb8qWtc2iOgE5SeIHlpS1up9bFq2wAyYhl1UdTObYiHe98zEM9SQvSoqQZ1IQD0JNpg3Ml5pg==}
     engines: {node: '>= 12.0.0'}
@@ -1601,26 +1607,29 @@ snapshots:
     dependencies:
       css-tree: 3.2.1
 
-  '@cortexkit/antigravity-auth-core@3.0.14':
+  '@cortexkit/antigravity-auth-core@3.0.42':
     dependencies:
-      '@cortexkit/claustrum-client': 0.12.0
-      '@cortexkit/private-files': 0.2.1
-      '@cortexkit/subc-client': 0.22.5
+      '@cortexkit/claustrum-client': 0.18.0
+      '@cortexkit/private-files': 0.2.2
+      '@cortexkit/subc-client': 0.24.0
+      jsonc-parser: 3.3.1
       xdg-basedir: 5.1.0
       zod: 4.4.3
 
-  '@cortexkit/claustrum-client@0.12.0':
+  '@cortexkit/claustrum-client@0.18.0':
     dependencies:
       '@cortexkit/store': 0.2.3
-      '@cortexkit/subc-client': 0.22.5
+      '@cortexkit/subc-client': 0.24.0
 
   '@cortexkit/private-files@0.2.1': {}
+
+  '@cortexkit/private-files@0.2.2': {}
 
   '@cortexkit/store@0.2.3':
     dependencies:
       '@cortexkit/private-files': 0.2.1
 
-  '@cortexkit/subc-client@0.22.5': {}
+  '@cortexkit/subc-client@0.24.0': {}
 
   '@csstools/color-helpers@6.1.1': {}
 
@@ -2306,6 +2315,8 @@ snapshots:
       xml-name-validator: 5.0.0
     transitivePeerDependencies:
       - '@noble/hashes'
+
+  jsonc-parser@3.3.1: {}
 
   lightningcss-android-arm64@1.33.0:
     optional: true

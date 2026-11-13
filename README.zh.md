@@ -14,11 +14,12 @@
 
 ---
 
-## v0.5.3 版本重要更新
+## v0.5.5 版本重要更新
 
-- **修复 Claude VALIDATED 模式下 `anyOf` / `oneOf` 工具 Schema 校验报错 (解决 #12 / PR #13)**：彻底解决 `antigravity-claude-opus-5-5` 与 `antigravity-claude-sonnet-5-5` 在挂载含 `anyOf` 或 `oneOf` 联合类型的工具（如本插件自带的 `generate_image` 引用项、DSH 内置的定时任务、任务看板及 MCP 工具等）时触发 HTTP 400 `PROTOCOL_DRIFT` 的问题。
-- **Claude 工具 Schema 归一化与对象联合无损合并**：引入 `cleanClaudeSchema` 预处理机制，在单一 Schema 下无损合并多分支 `object` 判别联合属性及可扩展字符串枚举预设，并接入 `@cortexkit/antigravity-auth-core` 的 `toGeminiSchema(..., { claudeValidated: true })` 展平剩余异构联合。
-- **加固 Claude 工具参数类型提示**：标准化 `claudeToolTypeHint` 大小写转换，确保 `STRICT PARAMETERS:` 系统提示词中准确输出参数结构（如 `ARRAY_OF_OBJECTS[kind: string REQUIRED, handle: string, path: string]`），杜绝出现 `ARRAY_OF_UNKNOWN`。
+- **同步 `@cortexkit/antigravity-auth-core@3.0.42` 并原生支持 Gemini 4 Carbon**：同步上游核心库至 3.0.42 最新版，原生支持 `antigravity-gemini-4-carbon`（支持 low / medium / high 思考深度，262,144 tokens 输出上限），并吸收 Windows 长路径锁回收与原子文件操作加固。
+- **修复 Gemini 4 Argon 配额看板崩溃 Bug**：扩展 RPC 契约校验至最多 4 组配额并放行 `gemini-4` / `gemini-argon` 分组，彻底解决包含 Argon 额度的账号在配额面板解析失败崩溃的问题。
+- **多账号模型可用性缓存隔离**：基于账号唯一标识隔离模型探测快照，杜绝异构多账号池（如免费号与 Ultra 号混用）之间的模型权限交叉污染。
+- **已下线模型清理**：清理 Google 官方已下线的 `gemini-3.5-flash`，全面推荐使用最新的 `gemini-3.8-flash`。
 
 ## 核心特性与架构设计
 
@@ -34,8 +35,8 @@
 | 模型标识符 | 显示名称 | 核心模态 | 思考预算支持 |
 | :--- | :--- | :--- | :--- |
 | `antigravity-gemini-4-argon` | Gemini 4 Argon | 文本, 视觉, 工具 | Low / Medium / High |
+| `antigravity-gemini-4-carbon` | Gemini 4 Carbon | 文本, 视觉, 工具 | Low / Medium / High |
 | `antigravity-gemini-3.8-flash` | Gemini 3.8 Flash | 文本, 视觉, 工具 | Low / Medium / High |
-| `antigravity-gemini-3.5-flash` | Gemini 3.5 Flash | 文本, 视觉, 工具 | Low / Medium / High |
 | `antigravity-claude-opus-5-5` | Claude Opus 5.5 | 文本, 视觉, 工具 | Low / Medium / High |
 | `antigravity-claude-sonnet-5-5` | Claude Sonnet 5.5 | 文本, 视觉, 工具 | Low / Medium / High |
 | `antigravity-gpt-oss-120b-medium` | GPT-OSS 120B Medium | 文本, 视觉, 工具 | 固定档位 |

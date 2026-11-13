@@ -28,7 +28,7 @@ export interface QuotaWindowView {
 }
 
 export interface QuotaGroupView {
-  readonly group: 'gemini' | 'non-gemini'
+  readonly group: 'gemini' | 'non-gemini' | 'gemini-4' | 'gemini-argon'
   readonly modelCount: number
   readonly windows: readonly QuotaWindowView[]
 }
@@ -270,7 +270,7 @@ function identifyWindow(value: Record<string, unknown>): QuotaWindowKind | undef
   return undefined
 }
 
-function identifyGroup(candidate: Record<string, unknown>, bucket?: Record<string, unknown>): 'gemini' | 'non-gemini' | undefined {
+function identifyGroup(candidate: Record<string, unknown>, bucket?: Record<string, unknown>): QuotaGroupView['group'] | undefined {
   const raw = [
     candidate.displayName,
     candidate.group,
@@ -284,6 +284,7 @@ function identifyGroup(candidate: Record<string, unknown>, bucket?: Record<strin
     bucket?.bucket_id,
     bucket?.displayName,
   ].filter(Boolean).map(String).join(' ').toLowerCase()
+  if (raw.includes('argon') || raw.includes('gemini-4')) return 'gemini-4'
   if (raw.includes('3p') || raw.includes('non') || raw.includes('claude') || raw.includes('gpt') || raw.includes('openai') || raw.includes('anthropic') || raw.includes('third-party') || raw.includes('external')) return 'non-gemini'
   if (raw.includes('gemini') || raw.includes('google') || raw.includes('chat') || raw.includes('code') || raw.includes('default') || raw.length === 0) return 'gemini'
   return 'gemini'

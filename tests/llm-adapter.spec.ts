@@ -1302,13 +1302,18 @@ describe('Antigravity LLM adapter', () => {
     })
   })
 
-  it('supports Gemini 4 Argon and Claude 5.5 models with native adaptive thinking configurations', async () => {
+  it('supports Gemini 4 Argon, Gemini 4 Carbon, and Claude 5.5 models with native adaptive thinking configurations', async () => {
     const adapter = new AntigravityAdapter({
       auth: { credential: vi.fn(async () => credential('access')) },
     })
     await expect(adapter.resolveModel(ANTIGRAVITY_PROVIDER, 'antigravity-gemini-4-argon')).resolves.toMatchObject({
       id: 'antigravity-gemini-4-argon',
       defaultMaxTokens: 65536,
+      reasoning: { defaultEffort: ReasoningEffortId('medium') },
+    })
+    await expect(adapter.resolveModel(ANTIGRAVITY_PROVIDER, 'antigravity-gemini-4-carbon')).resolves.toMatchObject({
+      id: 'antigravity-gemini-4-carbon',
+      defaultMaxTokens: 262144,
       reasoning: { defaultEffort: ReasoningEffortId('medium') },
     })
     await expect(adapter.resolveModel(ANTIGRAVITY_PROVIDER, 'antigravity-claude-opus-5-5')).resolves.toMatchObject({
@@ -1330,6 +1335,19 @@ describe('Antigravity LLM adapter', () => {
       },
     })
 
+    const carbonPayload = buildAntigravityGeneratePayload(
+      options({ model: 'antigravity-gemini-4-carbon', reasoningEffort: ReasoningEffortId('high') }),
+      credential('access'),
+    )
+    expect(carbonPayload.model).toBe('gemini-4-carbon-high')
+    expect((carbonPayload.request as { generationConfig: unknown }).generationConfig).toEqual({
+      maxOutputTokens: 262144,
+      thinkingConfig: {
+        includeThoughts: true,
+        thinkingLevel: 'HIGH',
+      },
+    })
+
     const claude55Payload = buildAntigravityGeneratePayload(
       options({ model: 'antigravity-claude-opus-5-5', reasoningEffort: ReasoningEffortId('medium') }),
       credential('access'),
@@ -1343,5 +1361,51 @@ describe('Antigravity LLM adapter', () => {
         thinkingLevel: 'MEDIUM',
       },
     })
+  })
+
+  it('isolates live model discovery cache per account and supports selective invalidation', async () => {
+    let requestCount = 0
+    const transport = {
+      request: vi.fn(async () => {
+        requestCount += 1
+        return liveCatalog()
+      }),
+    }
+    let currentAccount = 'account-a'
+    const adapter = new AntigravityAdapter({
+      auth: {
+        credential: vi.fn(async () => ({
+          ...credential('access'),
+          email: `${currentAccount}@example.com`,
+          lineage: currentAccount,
+        })),
+      },
+      transport,
+    })
+
+    // First call for account-a fetches live
+    await adapter.listModels(ANTIGRAVITY_PROVIDER)
+    expect(requestCount).toBe(1)
+
+    // Second call for account-a uses cached result
+    await adapter.listModels(ANTIGRAVITY_PROVIDER)
+    expect(requestCount).toBe(1)
+
+    // Switch to account-b
+    currentAccount = 'account-b'
+    await adapter.listModels(ANTIGRAVITY_PROVIDER)
+    expect(requestCount).toBe(2)
+
+    // Selectively invalidate account-a only
+    adapter.invalidateModelCatalog('account-a')
+
+    // account-b should still hit cache
+    await adapter.listModels(ANTIGRAVITY_PROVIDER)
+    expect(requestCount).toBe(2)
+
+    // account-a should re-fetch
+    currentAccount = 'account-a'
+    await adapter.listModels(ANTIGRAVITY_PROVIDER)
+    expect(requestCount).toBe(3)
   })
 })

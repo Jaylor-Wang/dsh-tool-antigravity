@@ -497,8 +497,12 @@ function QuotaVisualDashboard({
       {quota?.state === 'available' && quota.groups !== undefined && quota.groups.length > 0 ? (
         <div className="agy-quota-groups">
           {quota.groups.map(group => {
-            const groupTitle = group.group === 'gemini' ? t('geminiGroupTitle') : t('claudeGptGroupTitle')
-            const groupDesc = group.group === 'gemini' ? t('geminiGroupDesc') : t('claudeGptGroupDesc')
+            const groupTitle = (group.group === 'gemini-4' || group.group === 'gemini-argon')
+              ? (t('gemini4GroupTitle') || 'GEMINI 4 MODELS')
+              : group.group === 'gemini' ? t('geminiGroupTitle') : t('claudeGptGroupTitle')
+            const groupDesc = (group.group === 'gemini-4' || group.group === 'gemini-argon')
+              ? (t('gemini4GroupDesc') || 'Models within this group: Gemini 4 Argon')
+              : group.group === 'gemini' ? t('geminiGroupDesc') : t('claudeGptGroupDesc')
             return (
               <div key={group.group} className="agy-quota-group">
                 <div className="agy-quota-group-header">

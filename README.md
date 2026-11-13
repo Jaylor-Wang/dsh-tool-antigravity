@@ -14,11 +14,12 @@ Provides private Google OAuth 2.0 PKCE authentication, smart multi-account pooli
 
 ---
 
-## Highlights in v0.5.3
+## Highlights in v0.5.5
 
-- **Normalize `anyOf` / `oneOf` Tool Schemas for Claude VALIDATED Mode (Fixes #12 / PR #13)**: Resolved HTTP 400 `PROTOCOL_DRIFT` error on `antigravity-claude-opus-5-5` and `antigravity-claude-sonnet-5-5` when tool definitions contain `anyOf` or `oneOf` unions (such as `generate_image.references.items`, DSH built-in `schedule_*`, `task_board_update`, or MCP tools).
-- **Claude Schema Normalization & Discriminated Union Merging**: Pre-merges multi-branch `object` unions into unified schemas preserving all branch properties and discriminant keys, merges open string presets, and pipelines schemas through `@cortexkit/antigravity-auth-core`'s `toGeminiSchema(..., { claudeValidated: true })`.
-- **Accurate Claude Tool Type Hints**: Lowercases type representations in `claudeToolTypeHint` so `STRICT PARAMETERS:` system instructions emit clean type hints (e.g. `ARRAY_OF_OBJECTS[kind: string REQUIRED, handle: string, path: string]`) without `ARRAY_OF_UNKNOWN`.
+- **Sync `@cortexkit/antigravity-auth-core@3.0.42` & Native Gemini 4 Carbon Support**: Upgraded the core foundation to v3.0.42. Natively supports `antigravity-gemini-4-carbon` (low, medium, high) with 262,144 output token limit and adaptive native thinking, while incorporating upstream Windows long-path file lock recovery and atomic state synchronization.
+- **Fix Gemini 4 Argon Quota Dashboard Crash**: Updated RPC contract schema validation to support up to 4 quota groups including `gemini-4` / `gemini-argon`, resolving dashboard crashes for accounts with Argon allowances.
+- **Per-Account Model Availability Isolation**: Isolated live model catalog snapshots per account lineage, eliminating entitlement contamination across heterogeneous multi-account pools.
+- **Model Catalog Housekeeping**: Cleaned up decommissioned `gemini-3.5-flash` references in favor of `gemini-3.8-flash`.
 
 ## Features
 
@@ -34,8 +35,8 @@ Provides private Google OAuth 2.0 PKCE authentication, smart multi-account pooli
 | Model Identifier | Display Name | Capabilities | Thinking Budget |
 | :--- | :--- | :--- | :--- |
 | `antigravity-gemini-4-argon` | Gemini 4 Argon | Text, Vision, Tools | Low / Medium / High |
+| `antigravity-gemini-4-carbon` | Gemini 4 Carbon | Text, Vision, Tools | Low / Medium / High |
 | `antigravity-gemini-3.8-flash` | Gemini 3.8 Flash | Text, Vision, Tools | Low / Medium / High |
-| `antigravity-gemini-3.5-flash` | Gemini 3.5 Flash | Text, Vision, Tools | Low / Medium / High |
 | `antigravity-claude-opus-5-5` | Claude Opus 5.5 | Text, Vision, Tools | Low / Medium / High |
 | `antigravity-claude-sonnet-5-5` | Claude Sonnet 5.5 | Text, Vision, Tools | Low / Medium / High |
 | `antigravity-gpt-oss-120b-medium` | GPT-OSS 120B Medium | Text, Vision, Tools | Fixed Effort |
