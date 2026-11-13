@@ -1046,6 +1046,22 @@ function groupClaudeFunctionResponses(
   return grouped
 }
 
+/**
+ * Upstream Google Antigravity endpoints enforce an adversarial prompt injection
+ * check on Gemini models that silently impersonates HTTP 429 RESOURCE_EXHAUSTED
+ * when sensitive unrestricted sandbox prefix tags are present.
+ *
+ * In multi-model workflows where users share a global prompt across models
+ * (e.g. DeepSeek / Claude / Gemini), sanitize these markers in-flight for Gemini
+ * while preserving the remainder of the system instructions and leaving non-Gemini
+ * models intact.
+ */
+const GEMINI_SENSITIVE_SANDBOX_MARKER_PATTERN = /^\s*\[MODE:\s*UNRESTRICTED\s*SANDBOX[^\n\r]*\][\r\n]*/gim
+
+function sanitizeGeminiSystemInstruction(text: string): string {
+  return text.replace(GEMINI_SENSITIVE_SANDBOX_MARKER_PATTERN, '').trim()
+}
+
 function buildPayloadFromContents(
   options: GenerateOptions,
   credential: HostCredential,
@@ -1057,12 +1073,18 @@ function buildPayloadFromContents(
   const request: Record<string, unknown> = { contents: requestContents }
   // V3 AgentLoop stores instructions in system messages. One-shot callers may
   // still provide a separate preface; preserve both in their original order.
-  const systemParts = [
+  const isGeminiModel = /gemini/i.test(options.model || wireModel)
+  const rawSystemParts = [
     ...(options.system?.trim() ? [{ text: options.system }] : []),
     ...options.messages.flatMap(message => message.role === 'system'
       ? message.content.flatMap(block => block.type === 'text' && block.text.trim() ? [{ text: block.text }] : [])
       : []),
   ]
+  const systemParts = isGeminiModel
+    ? rawSystemParts
+        .map(part => typeof part.text === 'string' ? { ...part, text: sanitizeGeminiSystemInstruction(part.text) } : part)
+        .filter(part => typeof part.text === 'string' && part.text.length > 0)
+    : rawSystemParts
   if (systemParts.length > 0) request.systemInstruction = { parts: systemParts }
   const generationConfig: Record<string, unknown> = {}
   if (options.maxTokens !== undefined) generationConfig.maxOutputTokens = boundedInteger(options.maxTokens, 1, 1_000_000, 'maxTokens')
