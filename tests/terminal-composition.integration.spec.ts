@@ -140,4 +140,16 @@ describe('antigravity-auth slash command on a terminal composition (no WebServer
     expect(logged).not.toContain('state=')
     expect(logged).not.toContain('code_challenge')
   })
+
+  it('dispatches /antigravity-models through the real command runtime', async () => {
+    const { ctx, agent } = await mountTerminal()
+
+    const execution = await ctx.commands.execute(agent, '/antigravity-models', [], new AbortController().signal)
+
+    expect(execution?.result.kind).toBe('success')
+    if (execution?.result.kind === 'success') {
+      expect(execution.result.text).toContain('Antigravity models (snapshot;')
+      expect(execution.result.text).toContain('antigravity-gemini-4-hydrogen')
+    }
+  })
 })

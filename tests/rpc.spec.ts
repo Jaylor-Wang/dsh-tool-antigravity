@@ -258,20 +258,39 @@ describe('Antigravity login RPC', () => {
     service.selectAccount = vi.fn(async () => ({ state: 'selected' as const }))
     service.removeAccount = vi.fn(async () => ({ state: 'removed' as const }))
     const invalidateModelCatalog = vi.fn()
+    const onCatalogChanged = vi.fn()
     const catalog = {
       catalogSnapshot: vi.fn(() => ({ state: 'snapshot' as const, models: [{ id: 'antigravity-gemini-3.8-flash', name: 'Gemini 3.8 Flash', state: 'snapshot' as const }] })),
       modelCatalog: vi.fn(async () => ({ state: 'live-available' as const, models: [{ id: 'antigravity-gemini-3.8-flash', name: 'Gemini 3.8 Flash', state: 'live-available' as const }] })),
       invalidateModelCatalog,
     }
 
-    await expect(handleAntigravityAuthRpc(service, 'select-account', { id: 'acc-1' }, signal, catalog))
+    await expect(handleAntigravityAuthRpc(service, 'select-account', { id: 'acc-1' }, signal, catalog, onCatalogChanged))
       .resolves.toEqual({ ok: true, value: { state: 'selected' } })
     expect(invalidateModelCatalog).toHaveBeenCalledTimes(1)
     expect(invalidateModelCatalog).toHaveBeenLastCalledWith()
+    expect(onCatalogChanged).toHaveBeenCalledTimes(1)
 
-    await expect(handleAntigravityAuthRpc(service, 'remove-account', { id: 'acc-1' }, signal, catalog))
+    await expect(handleAntigravityAuthRpc(service, 'remove-account', { id: 'acc-1' }, signal, catalog, onCatalogChanged))
       .resolves.toEqual({ ok: true, value: { state: 'removed' } })
     expect(invalidateModelCatalog).toHaveBeenCalledTimes(2)
+    expect(onCatalogChanged).toHaveBeenCalledTimes(2)
+
+    vi.spyOn(service, 'status').mockResolvedValue({
+      pluginId: 'dsh-tool-antigravity',
+      phase: 'bootstrap',
+      privateSelfUse: true,
+      singleAccount: true,
+      riskAcknowledgementRequired: true,
+      riskAcknowledged: true,
+      login: { phase: 'success', configured: true, projectAvailable: true },
+      accounts: [],
+      capabilities: [{ id: 'auth-llm', state: 'available', reasonCode: 'capability-ready' }],
+    })
+    await handleAntigravityAuthRpc(service, 'models', { force: false }, signal, catalog, onCatalogChanged)
+    expect(onCatalogChanged).toHaveBeenCalledTimes(2)
+    await handleAntigravityAuthRpc(service, 'models', { force: true }, signal, catalog, onCatalogChanged)
+    expect(onCatalogChanged).toHaveBeenCalledTimes(3)
 
     await handleAntigravityAuthRpc(service, 'logout', {}, signal, catalog)
     expect(invalidateModelCatalog).toHaveBeenCalledWith(true)

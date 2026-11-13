@@ -121,11 +121,12 @@ describe('bootstrap lifecycle boundary', () => {
 
       let provided: AntigravityAuthService | undefined
       let cleanup: (() => Promise<void>) | undefined
-      const disposeAdapter = vi.fn()
+      const disposeAdapter = Object.assign(vi.fn(), { replace: vi.fn() })
       const registerAdapter = vi.fn(() => disposeAdapter)
+      const registeredCommands: CommandDefinition[] = []
       const runtime = {
         connection: { fetch: { register: vi.fn(() => vi.fn()) } },
-        commands: { register: vi.fn(() => vi.fn()) },
+        commands: { register: vi.fn((definition: CommandDefinition) => { registeredCommands.push(definition); return vi.fn() }) },
         llm: { registerAdapter, listProviders: vi.fn(() => []) },
         provide: vi.fn((_name: string, service: AntigravityAuthService) => { provided = service; return vi.fn(async () => {}) }),
         get: vi.fn((service: string) => service === 'webServer' ? { host: '127.0.0.1' } : undefined),
@@ -135,6 +136,14 @@ describe('bootstrap lifecycle boundary', () => {
 
       applyAuth(runtime as never)
       await vi.waitFor(() => expect(registerAdapter).toHaveBeenCalledOnce())
+
+      const modelsCommand = registeredCommands.find(command => command.name === 'antigravity-models')
+      expect(modelsCommand).toBeDefined()
+      globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({
+        models: { 'gemini-4-hydrogen-high': { model: 'MODEL_PLACEHOLDER_M37', displayName: 'Gemini 4 Hydrogen' } },
+      }), { status: 200, headers: { 'content-type': 'application/json' } })) as typeof globalThis.fetch
+      await modelsCommand!.handler({ rawInput: 'refresh' } as never)
+      expect(disposeAdapter.replace).toHaveBeenCalledWith(['google-antigravity'])
 
       await provided?.recordLlmFamilyGate('claude', 'protocol-drift')
       await vi.waitFor(() => expect(disposeAdapter).toHaveBeenCalledOnce())

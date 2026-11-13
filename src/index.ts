@@ -10,6 +10,7 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-llm'
 import { createAntigravityAuthService } from './auth-service.ts'
 import { createAntigravityAuthCommand } from './auth-command.ts'
+import { createAntigravityModelsCommand } from './models-command.ts'
 import { AntigravityAdapter, ANTIGRAVITY_PROVIDER } from './llm-adapter.ts'
 import { defaultAuthStorePath } from './auth-store.ts'
 import { registerAccountRoutes } from './account-routes.ts'
@@ -67,6 +68,14 @@ export function apply(ctx: Context, config: AntigravityAuthConfig = {}): void {
     ...(runtime.attachments === undefined ? {} : { attachments: runtime.attachments }),
     ...(fs === undefined ? {} : { fs }),
   })
+  let adapterHandle: ((() => void) & { replace?: (providers: string[]) => void }) | undefined
+  const notifyCatalogChanged = (): void => {
+    try {
+      adapterHandle?.replace?.([ANTIGRAVITY_PROVIDER])
+    } catch {
+      // Best-effort topology notification if the adapter registration was concurrently released.
+    }
+  }
   const contextWithProvide = ctx as Context & { provide?: (name: string, value: unknown) => () => Promise<void> | void }
   const unprovide = contextWithProvide.provide?.('antigravityAuth', service) ?? (() => {})
   ctx.inject(['connection'], (connectionCtx) => {
@@ -74,7 +83,7 @@ export function apply(ctx: Context, config: AntigravityAuthConfig = {}): void {
     accountMode = commandAccountMode(webServer)
     const guard = createLoopbackRpcGuard(
       webServer?.host,
-      (endpoint, payload, signal) => handleAntigravityAuthRpc(service, endpoint, payload, signal, adapter),
+      (endpoint, payload, signal) => handleAntigravityAuthRpc(service, endpoint, payload, signal, adapter, notifyCatalogChanged),
     )
     if (guard.mode === 'blocked') {
       connectionCtx.logger.warn('antigravity-auth: account RPC is disabled because the WebServer is not loopback-bound')
@@ -95,7 +104,9 @@ export function apply(ctx: Context, config: AntigravityAuthConfig = {}): void {
       if (runtime.llm?.registerAdapter === undefined) return undefined
       if (runtime.llm.listProviders?.().some(provider => provider.id === ANTIGRAVITY_PROVIDER)) return undefined
       const dispose = runtime.llm.registerAdapter([ANTIGRAVITY_PROVIDER], adapter)
+      adapterHandle = dispose
       return () => {
+        adapterHandle = undefined
         try { dispose() } finally { adapter.invalidateModelCatalog() }
       }
     },
@@ -103,7 +114,18 @@ export function apply(ctx: Context, config: AntigravityAuthConfig = {}): void {
     cleanup: unprovide,
     label: 'antigravity-auth: OAuth and LLM operations',
   })
-  ctx.inject(['commands'], commandCtx => commandCtx.commands.register(createAntigravityAuthCommand(service, () => accountMode)))
+  ctx.inject(['commands'], (commandCtx) => {
+    const disposeModels = commandCtx.commands.register(
+      createAntigravityModelsCommand(service, adapter, () => accountMode, notifyCatalogChanged),
+    )
+    const disposeAuth = commandCtx.commands.register(
+      createAntigravityAuthCommand(service, () => accountMode),
+    )
+    return () => {
+      disposeAuth()
+      disposeModels()
+    }
+  })
   registerAntigravityPetBalance(ctx, service)
 }
 

@@ -88,6 +88,7 @@ Manage authentication directly from the DSH terminal / chat prompt:
 - `/antigravity-auth status`: Check current authentication state, masked email, and project id.
 - `/antigravity-auth logout`: Discard credentials and revoke tokens.
 - `/antigravity-auth cancel`: Abort an ongoing login attempt.
+- `/antigravity-models [refresh|list]`: Force-refresh available Antigravity models from the server (`refresh`, default) or inspect cached/current availability (`list`).
 
 ### UI Settings & Dashboard
 Once loaded in the DSH Web client:

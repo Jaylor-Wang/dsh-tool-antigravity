@@ -88,6 +88,7 @@ pnpm add dsh-tool-antigravity
 - `/antigravity-auth status`：查看当前账号登录状态、脱敏邮箱与 Project ID。
 - `/antigravity-auth logout`：注销当前登录凭证并吊销 Token。
 - `/antigravity-auth cancel`：取消正在进行的登录操作。
+- `/antigravity-models [refresh|list]`：从服务端强制刷新 Antigravity 可用模型列表（`refresh`，默认）或查看当前/缓存模型列表（`list`）。
 
 ### 前端设置与仪表盘
 在 DSH Web 前端设置页面中自动注入：

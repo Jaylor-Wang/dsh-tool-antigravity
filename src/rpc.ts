@@ -7,7 +7,10 @@ import type { BootstrapStatusService } from './status.ts'
 import type { AccountOperationResult } from './auth-service.ts'
 import type { QuotaStatusView } from './quota.ts'
 import { isSafeRpcErrorCode, safeRpcErrorMessage } from './rpc-vocabulary.ts'
-import type { AntigravityModelCatalogService } from './model-catalog.ts'
+import {
+  resolveAntigravityModelCatalog,
+  type AntigravityModelCatalogService,
+} from './model-catalog.ts'
 import { getStoredProxy, setStoredProxy, applyProxySetting } from './proxy-config.ts'
 export { ANTIGRAVITY_AUTH_RPC_CHANNEL, ANTIGRAVITY_AUTH_RPC_NAMESPACE } from './rpc-contract.ts'
 
@@ -22,6 +25,7 @@ export async function handleAntigravityAuthRpc(
   payload: unknown,
   signal?: AbortSignal,
   modelCatalog?: AntigravityModelCatalogService,
+  onCatalogChanged?: () => void,
 ): Promise<RpcResult<unknown>> {
   if (signal?.aborted === true) return cancelled()
 
@@ -34,25 +38,31 @@ export async function handleAntigravityAuthRpc(
       if (!isAccountHandlePayload(payload)) return badRequest('select-account expects { id: string }')
       if (service.selectAccount === undefined) return badRequest('account selection is unavailable')
       const result = await service.selectAccount(payload.id)
-      if (result.state === 'selected') modelCatalog?.invalidateModelCatalog?.()
+      if (result.state === 'selected') {
+        modelCatalog?.invalidateModelCatalog?.()
+        onCatalogChanged?.()
+      }
       return { ok: true, value: result }
     }
     if (endpoint === 'remove-account') {
       if (!isAccountHandlePayload(payload)) return badRequest('remove-account expects { id: string }')
       if (service.removeAccount === undefined) return badRequest('account removal is unavailable')
       const result = await service.removeAccount(payload.id)
-      if (result.state === 'removed') modelCatalog?.invalidateModelCatalog?.()
+      if (result.state === 'removed') {
+        modelCatalog?.invalidateModelCatalog?.()
+        onCatalogChanged?.()
+      }
       return { ok: true, value: result }
     }
     if (endpoint === 'models') {
       if (!isRefreshPayload(payload)) return badRequest('models expects {} or { force: boolean }')
       if (modelCatalog === undefined) return badRequest('model catalog is unavailable')
-      const status = await service.status()
-      const gateReady = status.login.projectAvailable
-        && status.capabilities.some(capability => capability.id === 'auth-llm' && capability.state === 'available')
-      return { ok: true, value: gateReady
-        ? await modelCatalog.modelCatalog(signal, payload.force)
-        : modelCatalog.catalogSnapshot() }
+      const { catalog } = await resolveAntigravityModelCatalog(service, modelCatalog, {
+        signal,
+        forceRefresh: payload.force,
+        onUpdated: onCatalogChanged,
+      })
+      return { ok: true, value: catalog }
     }
     if (endpoint === 'usage') {
       if (!isRefreshPayload(payload)) return badRequest('usage expects {} or { force: boolean }')
