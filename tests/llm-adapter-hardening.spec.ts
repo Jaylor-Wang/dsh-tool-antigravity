@@ -120,6 +120,47 @@ describe('LLM adapter hardening: Tool schemas', () => {
     expect(wire).toContain('"nullable":true')
   })
 
+  it('expands multi-type arrays into Gemini anyOf alternatives and omits type when covering all JSON types', () => {
+    const tools: ToolSchema[] = [
+      {
+        name: 'multi_type_tool',
+        description: 'Tool with multi-type parameter schemas',
+        parameters: {
+          type: 'object',
+          properties: {
+            scalarUnion: {
+              type: ['string', 'number'],
+              description: 'String or number',
+            },
+            anyJson: {
+              type: ['object', 'array', 'string', 'number', 'boolean', 'null'],
+              description: 'Any JSON value',
+            },
+          },
+        },
+      },
+    ]
+
+    const payload = buildAntigravityGeneratePayload({
+      provider: 'google-antigravity',
+      model: 'antigravity-gemini-3.8-flash',
+      messages: [{ id: 'm1' as never, role: 'user', content: [{ type: 'text', text: 'hi' }], source: { kind: 'user' } }],
+      tools,
+    }, MOCK_CREDENTIAL)
+
+    const declarations = (payload.request as { tools: Array<{ functionDeclarations: Array<Record<string, unknown>> }> }).tools
+      .flatMap(entry => entry.functionDeclarations ?? [])
+    const props = (declarations[0]?.parameters as Record<string, unknown>)?.properties as Record<string, Record<string, unknown>>
+    expect(props.scalarUnion).toEqual({
+      description: 'String or number',
+      anyOf: [{ type: 'STRING' }, { type: 'NUMBER' }],
+    })
+    expect(props.anyJson).toEqual({
+      description: 'Any JSON value',
+      nullable: true,
+    })
+  })
+
   it('flattens and merges anyOf/oneOf tool schemas for Claude VALIDATED mode without untyped union nodes', () => {
     const tools: ToolSchema[] = [
       {
@@ -192,7 +233,8 @@ describe('LLM adapter hardening: Tool schemas', () => {
       tools,
     }, MOCK_CREDENTIAL)
 
-    const declarations = ((payload.request as { tools: Array<{ functionDeclarations: Array<Record<string, unknown>> }> }).tools)[0]?.functionDeclarations ?? []
+    const declarations = (payload.request as { tools: Array<{ functionDeclarations: Array<Record<string, unknown>> }> }).tools
+      .flatMap(entry => entry.functionDeclarations ?? [])
     const wire = JSON.stringify(declarations)
     expect(wire).not.toContain('"anyOf"')
     expect(wire).not.toContain('"oneOf"')

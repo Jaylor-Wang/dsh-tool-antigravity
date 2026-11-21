@@ -5,7 +5,7 @@
 [![npm version](https://img.shields.io/npm/v/dsh-tool-antigravity.svg?color=blue)](https://www.npmjs.com/package/dsh-tool-antigravity)
 [![license](https://img.shields.io/github/license/Jaylor-Wang/dsh-tool-antigravity.svg)](LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/Jaylor-Wang/dsh-tool-antigravity.svg)](https://github.com/Jaylor-Wang/dsh-tool-antigravity/releases)
-[![Tests](https://img.shields.io/badge/tests-39%20suites%20%7C%20425%20passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-39%20suites%20%7C%20429%20passed-brightgreen.svg)](tests/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Strict%20Types-blue.svg)](tsconfig.json)
 
 为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) 打造的高性能 Antigravity 核心能力包插件。
@@ -14,12 +14,17 @@
 
 ---
 
-## v0.5.5 版本重要更新
-
-- **同步 `@cortexkit/antigravity-auth-core@3.0.42` 并原生支持 Gemini 4 Carbon**：同步上游核心库至 3.0.42 最新版，原生支持 `antigravity-gemini-4-carbon`（支持 low / medium / high 思考深度，262,144 tokens 输出上限），并吸收 Windows 长路径锁回收与原子文件操作加固。
-- **修复 Gemini 4 Argon 配额看板崩溃 Bug**：扩展 RPC 契约校验至最多 4 组配额并放行 `gemini-4` / `gemini-argon` 分组，彻底解决包含 Argon 额度的账号在配额面板解析失败崩溃的问题。
-- **多账号模型可用性缓存隔离**：基于账号唯一标识隔离模型探测快照，杜绝异构多账号池（如免费号与 Ultra 号混用）之间的模型权限交叉污染。
-- **已下线模型清理**：清理 Google 官方已下线的 `gemini-3.5-flash`，全面推荐使用最新的 `gemini-3.8-flash`。
+> [!CAUTION]
+> **使用此插件可能导致您的 Google 账号被封禁。** 使用本软件或任何 Antigravity 代理工具均违反 Google 服务条款。
+>
+> - 自 2026 年 11 月中旬起，已有用户反馈 Google 正在因通过第三方工具使用 Antigravity 而封禁整个 Google 账号。报错为 `403 PERMISSION_DENIED` 及 `TOS_VIOLATION`，且该封禁同样会阻断 Google 官方自己的 Antigravity CLI（[#74](https://github.com/cortexkit/antigravity-auth/issues/74)）。
+> - 更早前的反馈还包括账号封禁与影子封禁（无通知限流/限制）。
+> - 据反馈，被封禁的账号仅可通过申诉恢复一次，第二次封禁将是永久性的。
+> - 请勿使用您无法承受丢失风险的账号。
+>
+> 本项目未获得 Google 或任何模型提供商的背书。您需自行负责遵守提供商条款，并自行承担使用本项目的法律、经济与技术风险。
+>
+> 切勿在 Git、Issues 或聊天中分享 OAuth Token、浏览器 Cookie、账号文件、Bearer Token 或原始请求/响应转储。
 
 ## 核心特性与架构设计
 
@@ -36,6 +41,8 @@
 | :--- | :--- | :--- | :--- |
 | `antigravity-gemini-4-argon` | Gemini 4 Argon | 文本, 视觉, 工具 | Low / Medium / High |
 | `antigravity-gemini-4-carbon` | Gemini 4 Carbon | 文本, 视觉, 工具 | Low / Medium / High |
+| `antigravity-gemini-4-hydrogen` | Gemini 4 Hydrogen | 文本, 视觉, 工具 | Low / Medium / High / XHigh |
+| `antigravity-gemini-4-neon` | Gemini 4 Neon | 文本, 视觉, 工具 | Low / Medium / High / XHigh |
 | `antigravity-gemini-3.8-flash` | Gemini 3.8 Flash | 文本, 视觉, 工具 | Low / Medium / High |
 | `antigravity-claude-opus-5-5` | Claude Opus 5.5 | 文本, 视觉, 工具 | Low / Medium / High |
 | `antigravity-claude-sonnet-5-5` | Claude Sonnet 5.5 | 文本, 视觉, 工具 | Low / Medium / High |

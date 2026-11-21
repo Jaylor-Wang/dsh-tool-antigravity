@@ -664,11 +664,11 @@ describe('Antigravity LLM adapter', () => {
         labels: { model_enum: 'MODEL_PLACEHOLDER_M319' },
         generationConfig: {
           maxOutputTokens: 65536,
-          thinkingConfig: { includeThoughts: true, thinkingBudget: 4000 },
+          thinkingConfig: { includeThoughts: true, thinkingLevel: 'MEDIUM' },
         },
       },
     })
-    expect(body.request.generationConfig.thinkingConfig).not.toHaveProperty('thinkingLevel')
+    expect(body.request.generationConfig.thinkingConfig).not.toHaveProperty('thinkingBudget')
     expect(Object.keys(body)).toEqual(['project', 'requestId', 'request', 'model', 'userAgent', 'requestType'])
   })
 
@@ -694,11 +694,11 @@ describe('Antigravity LLM adapter', () => {
         labels: { model_enum: 'MODEL_PLACEHOLDER_M318' },
         generationConfig: {
           maxOutputTokens: 65536,
-          thinkingConfig: { includeThoughts: true, thinkingBudget: -1 },
+          thinkingConfig: { includeThoughts: true, thinkingLevel: 'HIGH' },
         },
       },
     })
-    expect(body.request.generationConfig.thinkingConfig).not.toHaveProperty('thinkingLevel')
+    expect(body.request.generationConfig.thinkingConfig).not.toHaveProperty('thinkingBudget')
   })
 
   it('intersects the pinned snapshot with the authenticated live model catalog', async () => {
@@ -1298,11 +1298,11 @@ describe('Antigravity LLM adapter', () => {
     const body37 = JSON.parse(String((request400.mock.calls[0] as unknown as [{ body: string }] | undefined)?.[0]?.body))
     expect(body37.request.generationConfig.thinkingConfig).toEqual({
       includeThoughts: true,
-      thinkingBudget: -1,
+      thinkingLevel: 'HIGH',
     })
   })
 
-  it('supports Gemini 4 Argon, Gemini 4 Carbon, and Claude 5.5 models with native adaptive thinking configurations', async () => {
+  it('supports Gemini 4 Argon, Carbon, Hydrogen, Neon, and Claude 5.5 models with native adaptive thinking configurations', async () => {
     const adapter = new AntigravityAdapter({
       auth: { credential: vi.fn(async () => credential('access')) },
     })
@@ -1315,6 +1315,32 @@ describe('Antigravity LLM adapter', () => {
       id: 'antigravity-gemini-4-carbon',
       defaultMaxTokens: 262144,
       reasoning: { defaultEffort: ReasoningEffortId('medium') },
+    })
+    await expect(adapter.resolveModel(ANTIGRAVITY_PROVIDER, 'antigravity-gemini-4-hydrogen')).resolves.toMatchObject({
+      id: 'antigravity-gemini-4-hydrogen',
+      defaultMaxTokens: 262144,
+      reasoning: {
+        defaultEffort: ReasoningEffortId('high'),
+        efforts: [
+          { id: ReasoningEffortId('low'), name: 'Low' },
+          { id: ReasoningEffortId('medium'), name: 'Medium' },
+          { id: ReasoningEffortId('high'), name: 'High' },
+          { id: ReasoningEffortId('xhigh'), name: 'XHigh' },
+        ],
+      },
+    })
+    await expect(adapter.resolveModel(ANTIGRAVITY_PROVIDER, 'antigravity-gemini-4-neon')).resolves.toMatchObject({
+      id: 'antigravity-gemini-4-neon',
+      defaultMaxTokens: 262144,
+      reasoning: {
+        defaultEffort: ReasoningEffortId('high'),
+        efforts: [
+          { id: ReasoningEffortId('low'), name: 'Low' },
+          { id: ReasoningEffortId('medium'), name: 'Medium' },
+          { id: ReasoningEffortId('high'), name: 'High' },
+          { id: ReasoningEffortId('xhigh'), name: 'XHigh' },
+        ],
+      },
     })
     await expect(adapter.resolveModel(ANTIGRAVITY_PROVIDER, 'antigravity-claude-opus-5-5')).resolves.toMatchObject({
       id: 'antigravity-claude-opus-5-5',
@@ -1348,6 +1374,45 @@ describe('Antigravity LLM adapter', () => {
       },
     })
 
+    const hydrogenXHighPayload = buildAntigravityGeneratePayload(
+      options({ model: 'antigravity-gemini-4-hydrogen', reasoningEffort: ReasoningEffortId('xhigh') }),
+      credential('access'),
+    )
+    expect(hydrogenXHighPayload.model).toBe('gemini-4-hydrogen-xhigh')
+    expect((hydrogenXHighPayload.request as { generationConfig: unknown }).generationConfig).toEqual({
+      maxOutputTokens: 262144,
+      thinkingConfig: {
+        includeThoughts: true,
+        thinkingLevel: 100,
+      },
+    })
+
+    const neonDefaultPayload = buildAntigravityGeneratePayload(
+      options({ model: 'antigravity-gemini-4-neon' }),
+      credential('access'),
+    )
+    expect(neonDefaultPayload.model).toBe('gemini-4-neon-high')
+    expect((neonDefaultPayload.request as { generationConfig: unknown }).generationConfig).toEqual({
+      maxOutputTokens: 262144,
+      thinkingConfig: {
+        includeThoughts: true,
+        thinkingLevel: 'HIGH',
+      },
+    })
+
+    const neonXHighPayload = buildAntigravityGeneratePayload(
+      options({ model: 'antigravity-gemini-4-neon', reasoningEffort: ReasoningEffortId('xhigh') }),
+      credential('access'),
+    )
+    expect(neonXHighPayload.model).toBe('gemini-4-neon-xhigh')
+    expect((neonXHighPayload.request as { generationConfig: unknown }).generationConfig).toEqual({
+      maxOutputTokens: 262144,
+      thinkingConfig: {
+        includeThoughts: true,
+        thinkingLevel: 100,
+      },
+    })
+
     const claude55Payload = buildAntigravityGeneratePayload(
       options({ model: 'antigravity-claude-opus-5-5', reasoningEffort: ReasoningEffortId('medium') }),
       credential('access'),
@@ -1357,10 +1422,47 @@ describe('Antigravity LLM adapter', () => {
       maxOutputTokens: 128000,
       thinkingConfig: {
         includeThoughts: true,
-        thinkingBudget: 0,
         thinkingLevel: 'MEDIUM',
       },
     })
+  })
+
+  it('discovers Gemini 4 Hydrogen and Neon from live catalog and reuses retry request timestamp', async () => {
+    const request = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        models: {
+          'gemini-4-hydrogen-high': { displayName: 'Gemini 4 Hydrogen' },
+          'gemini-4-neon-high': { displayName: 'Gemini 4 Neon' },
+        },
+      })))
+      .mockResolvedValueOnce(new Response('', { status: 503 }))
+      .mockResolvedValueOnce(new Response('data: {"response":{"parts":[{"text":"ok"}],"finishReason":"STOP"}}\n\n'))
+    const adapter = new AntigravityAdapter({
+      auth: { credential: vi.fn(async () => credential('access')) },
+      transport: { request },
+    })
+
+    const models = await adapter.listModels(ANTIGRAVITY_PROVIDER)
+    expect(models.map(item => item.id)).toEqual([
+      'antigravity-gemini-4-hydrogen',
+      'antigravity-gemini-4-neon',
+    ])
+
+    await collectThroughRuntime(adapter, options({
+      model: 'antigravity-gemini-4-neon',
+      reasoningEffort: ReasoningEffortId('xhigh'),
+      sessionId: 'retry-session' as never,
+    }))
+    const firstAttempt = JSON.parse(String(request.mock.calls[1]?.[0].body)) as {
+      requestId: string
+      request: { labels: { request_id: string } }
+    }
+    const secondAttempt = JSON.parse(String(request.mock.calls[2]?.[0].body)) as {
+      requestId: string
+      request: { labels: { request_id: string } }
+    }
+    expect(secondAttempt.requestId).toBe(firstAttempt.requestId)
+    expect(secondAttempt.request.labels.request_id).toBe(firstAttempt.request.labels.request_id)
   })
 
   it('isolates live model discovery cache per account and supports selective invalidation', async () => {

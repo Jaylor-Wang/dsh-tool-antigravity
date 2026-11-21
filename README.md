@@ -5,7 +5,7 @@ English | [中文](README.zh.md)
 [![npm version](https://img.shields.io/npm/v/dsh-tool-antigravity.svg?color=blue)](https://www.npmjs.com/package/dsh-tool-antigravity)
 [![license](https://img.shields.io/github/license/Jaylor-Wang/dsh-tool-antigravity.svg)](LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/Jaylor-Wang/dsh-tool-antigravity.svg)](https://github.com/Jaylor-Wang/dsh-tool-antigravity/releases)
-[![Tests](https://img.shields.io/badge/tests-39%20suites%20%7C%20425%20passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-39%20suites%20%7C%20429%20passed-brightgreen.svg)](tests/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Strict%20Types-blue.svg)](tsconfig.json)
 
 High-performance, streamlined Antigravity capability bundle plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH).
@@ -14,12 +14,17 @@ Provides private Google OAuth 2.0 PKCE authentication, smart multi-account pooli
 
 ---
 
-## Highlights in v0.5.5
-
-- **Sync `@cortexkit/antigravity-auth-core@3.0.42` & Native Gemini 4 Carbon Support**: Upgraded the core foundation to v3.0.42. Natively supports `antigravity-gemini-4-carbon` (low, medium, high) with 262,144 output token limit and adaptive native thinking, while incorporating upstream Windows long-path file lock recovery and atomic state synchronization.
-- **Fix Gemini 4 Argon Quota Dashboard Crash**: Updated RPC contract schema validation to support up to 4 quota groups including `gemini-4` / `gemini-argon`, resolving dashboard crashes for accounts with Argon allowances.
-- **Per-Account Model Availability Isolation**: Isolated live model catalog snapshots per account lineage, eliminating entitlement contamination across heterogeneous multi-account pools.
-- **Model Catalog Housekeeping**: Cleaned up decommissioned `gemini-3.5-flash` references in favor of `gemini-3.8-flash`.
+> [!CAUTION]
+> **Using this plugin can get your Google account suspended.** Using this software, or any proxy for Antigravity, violates Google's Terms of Service.
+>
+> - Since mid-November 2026, users report that Google is suspending whole Google accounts for Antigravity use through third-party tools. The error is `403 PERMISSION_DENIED` with `TOS_VIOLATION`, and the suspension also blocks Google's own Antigravity CLI ([#74](https://github.com/cortexkit/antigravity-auth/issues/74)).
+> - Earlier reports include bans and shadow-bans (restrictions without notice).
+> - Reports say a suspended account can be reinstated by appeal only once, and a second suspension is permanent.
+> - Don't use an account you can't afford to lose.
+>
+> This project is not endorsed by Google or the model providers. You are responsible for compliance with provider terms, and you use it at your own legal, financial and technical risk.
+>
+> Never share OAuth tokens, browser cookies, account files, bearer tokens, or raw request/response dumps in Git, issues, or chat.
 
 ## Features
 
@@ -36,6 +41,8 @@ Provides private Google OAuth 2.0 PKCE authentication, smart multi-account pooli
 | :--- | :--- | :--- | :--- |
 | `antigravity-gemini-4-argon` | Gemini 4 Argon | Text, Vision, Tools | Low / Medium / High |
 | `antigravity-gemini-4-carbon` | Gemini 4 Carbon | Text, Vision, Tools | Low / Medium / High |
+| `antigravity-gemini-4-hydrogen` | Gemini 4 Hydrogen | Text, Vision, Tools | Low / Medium / High / XHigh |
+| `antigravity-gemini-4-neon` | Gemini 4 Neon | Text, Vision, Tools | Low / Medium / High / XHigh |
 | `antigravity-gemini-3.8-flash` | Gemini 3.8 Flash | Text, Vision, Tools | Low / Medium / High |
 | `antigravity-claude-opus-5-5` | Claude Opus 5.5 | Text, Vision, Tools | Low / Medium / High |
 | `antigravity-claude-sonnet-5-5` | Claude Sonnet 5.5 | Text, Vision, Tools | Low / Medium / High |

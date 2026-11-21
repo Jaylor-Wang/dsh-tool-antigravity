@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@cortexkit/antigravity-auth-core':
-        specifier: 3.0.42
-        version: 3.0.42
+        specifier: 3.1.11
+        version: 3.1.11
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: 4.0.2
@@ -190,14 +190,11 @@ packages:
     resolution: {integrity: sha512-ctxtJ/eA+t+6q2++vj5j7FYX3nRu311q1wfYH3xjlLOsczhlhxAg2FWNUXhpGvAw3BWo1xBcvOV6/YLc2r5FJw==}
     hasBin: true
 
-  '@cortexkit/antigravity-auth-core@3.0.42':
-    resolution: {integrity: sha512-mDTzJvcNo7FZD9QF9hBhtzxFEKfm1r3/cN8uTCtnCiQ7jeKNZw4OHrXbF3wyPvG+e9WAXf6b1i6PQaHauYDPZQ==}
+  '@cortexkit/antigravity-auth-core@3.1.11':
+    resolution: {integrity: sha512-DUG2De9RrrR6g/QaVjPyPJA9sdHfiD87x6xPEC2pYJpwLpQ+5mr6YF+CiQYc7Kr23YaveBZ3o1MC20cdNFRZ5Q==}
 
-  '@cortexkit/claustrum-client@0.18.0':
-    resolution: {integrity: sha512-tdRTrtnmOk3En1ZT1T+J+8NDwZl5FNxtN4w4Im2KV12QypPwyMi1ZBUXS2X4ZyDn4vPbHiOK8gjP+hQMsZ/V9g==}
-
-  '@cortexkit/private-files@0.2.1':
-    resolution: {integrity: sha512-U7ofFl45DDYScXo7vSV/4OPxn0xC1mflKpW8tbK8/3OaRd9q+TDEY25UWO8itXtSAlhBMqhZBZ3NxZNL5IyrSg==}
+  '@cortexkit/claustrum-client@0.21.0':
+    resolution: {integrity: sha512-36wFsjQOFlma7Mcd4JxYd86PTSu2oBYF4CL6dOJqISe+U+trzlSq1wrrezUr0aio+8qkquoIXGYJ/hDOSRvkPw==}
 
   '@cortexkit/private-files@0.2.2':
     resolution: {integrity: sha512-BdRxi4mzPkTUiZxKTlQV/RsESk5f34+sLk0qQLv1QlBQdkq2zw8yc0b3dm1qmZ5RfeChiBKEGgL6Qw31RCSaeA==}
@@ -1607,27 +1604,25 @@ snapshots:
     dependencies:
       css-tree: 3.2.1
 
-  '@cortexkit/antigravity-auth-core@3.0.42':
+  '@cortexkit/antigravity-auth-core@3.1.11':
     dependencies:
-      '@cortexkit/claustrum-client': 0.18.0
+      '@cortexkit/claustrum-client': 0.21.0
       '@cortexkit/private-files': 0.2.2
       '@cortexkit/subc-client': 0.24.0
       jsonc-parser: 3.3.1
       xdg-basedir: 5.1.0
       zod: 4.4.3
 
-  '@cortexkit/claustrum-client@0.18.0':
+  '@cortexkit/claustrum-client@0.21.0':
     dependencies:
       '@cortexkit/store': 0.2.3
       '@cortexkit/subc-client': 0.24.0
-
-  '@cortexkit/private-files@0.2.1': {}
 
   '@cortexkit/private-files@0.2.2': {}
 
   '@cortexkit/store@0.2.3':
     dependencies:
-      '@cortexkit/private-files': 0.2.1
+      '@cortexkit/private-files': 0.2.2
 
   '@cortexkit/subc-client@0.24.0': {}
 

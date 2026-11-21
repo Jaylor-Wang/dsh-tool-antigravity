@@ -81,6 +81,7 @@ async function connectDirect(url: URL, timeoutMs: number, signal: AbortSignal | 
     host: url.hostname,
     port: Number(url.port || DEFAULT_HTTPS_PORT),
     servername: url.hostname,
+    ALPNProtocols: ['http/1.1'],
   })
   configureSocketKeepAlive(socket)
   await waitForConnect(socket, 'secureConnect', timeoutMs, signal)
@@ -109,7 +110,7 @@ async function connectThroughProxy(proxy: URL, target: URL, timeoutMs: number, s
   }
   if (leftover.byteLength > 0) proxySocket.unshift(leftover)
   proxySocket.resume()
-  const socket = tls.connect({ socket: proxySocket, servername: target.hostname })
+  const socket = tls.connect({ socket: proxySocket, servername: target.hostname, ALPNProtocols: ['http/1.1'] })
   configureSocketKeepAlive(socket)
   await waitForConnect(socket, 'secureConnect', timeoutMs, signal)
   return socket

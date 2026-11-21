@@ -189,6 +189,35 @@ function sanitizeSchema(value: unknown, depth = 0): Record<string, unknown> {
     )]
     const nonNull = validTypes.filter(item => item !== 'null')
     if (validTypes.includes('null') && nonNull.length > 0) nullable = true
+    if (nonNull.length > 1) {
+      const coversEveryType = ['object', 'array', 'string', 'boolean'].every(item => nonNull.includes(item))
+        && (nonNull.includes('number') || nonNull.includes('integer'))
+      const baseDesc = typeof source.description === 'string' ? boundedText(source.description, 1024) : ''
+      if (coversEveryType) {
+        const output: Record<string, unknown> = {}
+        if (baseDesc.length > 0) output.description = baseDesc
+        if (nullable) output.nullable = true
+        return output
+      }
+      const branches = nonNull.slice(0, 8).map(branchType => {
+        const branchSource: Record<string, unknown> = { type: branchType }
+        if (branchType === 'object') {
+          if (source.properties !== undefined) branchSource.properties = source.properties
+          if (source.required !== undefined) branchSource.required = source.required
+        } else if (branchType === 'array') {
+          if (source.items !== undefined) branchSource.items = source.items
+        } else if (branchType === 'string') {
+          if (Array.isArray(source.enum) && source.enum.every(item => typeof item === 'string')) {
+            branchSource.enum = source.enum
+          }
+        }
+        return sanitizeSchema(branchSource, depth + 1)
+      })
+      const output: Record<string, unknown> = { anyOf: branches }
+      if (baseDesc.length > 0) output.description = baseDesc
+      if (nullable) output.nullable = true
+      return output
+    }
     explicitType = nonNull[0] ?? validTypes[0]
   }
   let enumValues: string[] | undefined

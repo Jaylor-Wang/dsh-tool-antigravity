@@ -6,6 +6,7 @@ import {
   CLAUDE_DESCRIPTION_PROMPT,
   CLAUDE_TOOL_SYSTEM_INSTRUCTION,
   SKIP_THOUGHT_SIGNATURE,
+  appendAgyContinuation,
   applyAgyNativeGenerationConfig,
   applyClaudeTransforms,
   applyGeminiTransforms,
@@ -16,8 +17,12 @@ import {
   getResolverAliasMap,
   isGeminiArgonModel,
   isGeminiCarbonModel,
+  isGeminiHydrogenModel,
+  isGeminiNeonModel,
   orderAgyRequestPayloadInPlace,
   resolveModelWithTier,
+  rewriteSystemInstruction,
+  supportsGeminiXHigh,
   toGeminiSchema,
 } from '@cortexkit/antigravity-auth-core'
 import * as dshLlm from '@deepseek-ai/dsh-llm'
@@ -146,7 +151,7 @@ export interface AntigravityRequestMetadata {
 /** Adapter that owns exactly one provider route and no fallback route. */
 export class AntigravityAdapter extends LlmAdapter {
   private readonly transport: PrivateTransport
-  private readonly sessions = new AgyRequestSessionStore('dsh-antigravity-auth')
+  private readonly sessions = new AgyRequestSessionStore()
   private readonly options: Required<Pick<AntigravityAdapterOptions, 'idleTimeoutMs' | 'totalTimeoutMs' | 'maxResponseBytes' | 'maxFrameBytes'>> & {
     readonly responseHeaderTimeoutMs: number
   }
@@ -285,6 +290,8 @@ export class AntigravityAdapter extends LlmAdapter {
       return
     }
     const family = antigravityModelFamily(options.model)
+    const sessionKey = requestSessionKey(options)
+    const requestScope = this.sessions.beginRequest(sessionKey)
     const hasEmitted = { value: false }
     let replayed = false
     let networkRetryCount = 0
@@ -296,8 +303,6 @@ export class AntigravityAdapter extends LlmAdapter {
       if (credential === undefined) {
         throw new LlmError('Antigravity login is required before model use', 'AUTH')
       }
-      const sessionKey = requestSessionKey(options)
-      const requestScope = this.sessions.beginRequest(sessionKey)
       let payload: Record<string, unknown> & { sentImageBytes?: Map<string, number> }
       try {
         payload = await buildAntigravityGeneratePayloadForAdapter(options, credential, requestScope.session, requestScope.timestamp, this.adapterOptions.attachments, this.adapterOptions.fs)
@@ -376,7 +381,6 @@ export class AntigravityAdapter extends LlmAdapter {
       }
       try {
         yield* this.streamResponse(response, options, hasEmitted)
-        this.sessions.completeExecution(sessionKey)
         return
       } catch (error) {
         const privateError = error instanceof PrivateTransportError ? error : undefined
@@ -653,7 +657,18 @@ function cleanModelDisplayName(name: string): string {
 
 function getModelReasoningEfforts(modelId: string): { efforts: readonly { id: ReturnType<typeof ReasoningEffortId>; name: string }[]; defaultEffort: ReturnType<typeof ReasoningEffortId> } | undefined {
   const lower = modelId.toLowerCase()
-  if (lower.includes('gemini-4-argon') || lower.includes('gemini-4-carbon') || (lower.includes('flash') && !lower.includes('image'))) {
+  if (supportsGeminiXHigh(lower)) {
+    return {
+      efforts: [
+        { id: ReasoningEffortId('low'), name: 'Low' },
+        { id: ReasoningEffortId('medium'), name: 'Medium' },
+        { id: ReasoningEffortId('high'), name: 'High' },
+        { id: ReasoningEffortId('xhigh'), name: 'XHigh' },
+      ],
+      defaultEffort: ReasoningEffortId('high'),
+    }
+  }
+  if (isGeminiArgonModel(lower) || isGeminiCarbonModel(lower) || (lower.includes('flash') && !lower.includes('image'))) {
     return {
       efforts: [
         { id: ReasoningEffortId('low'), name: 'Low' },
@@ -661,7 +676,7 @@ function getModelReasoningEfforts(modelId: string): { efforts: readonly { id: Re
         { id: ReasoningEffortId('high'), name: 'High' },
       ],
       defaultEffort: ReasoningEffortId(
-        lower.includes('gemini-4-argon') || lower.includes('gemini-4-carbon') || lower.includes('gemini-3.8-flash') ? 'medium' : 'high',
+        isGeminiArgonModel(lower) || isGeminiCarbonModel(lower) || lower.includes('gemini-3.8-flash') ? 'medium' : 'high',
       ),
     }
   }
@@ -743,6 +758,20 @@ function parseLiveModelIds(
       live.add('gemini-4-carbon-low')
       live.add('gemini-4-carbon-medium')
       live.add('gemini-4-carbon-high')
+    }
+    if (isGeminiHydrogenModel(cleanId) || cleanId.startsWith('gemini-4-hydrogen')) {
+      live.add('gemini-4-hydrogen')
+      live.add('gemini-4-hydrogen-low')
+      live.add('gemini-4-hydrogen-medium')
+      live.add('gemini-4-hydrogen-high')
+      live.add('gemini-4-hydrogen-xhigh')
+    }
+    if (isGeminiNeonModel(cleanId) || cleanId.startsWith('gemini-4-neon')) {
+      live.add('gemini-4-neon')
+      live.add('gemini-4-neon-low')
+      live.add('gemini-4-neon-medium')
+      live.add('gemini-4-neon-high')
+      live.add('gemini-4-neon-xhigh')
     }
     if (cleanId.startsWith('claude-sonnet-5-5')) {
       live.add('claude-sonnet-5-5')
@@ -1084,8 +1113,8 @@ function buildPayloadFromContents(
   contents: readonly Record<string, unknown>[],
 ): Record<string, unknown> {
   const wireModel = resolveWireModel(options.model, options.reasoningEffort)
-  const usesCapturedGemini38ThinkingBudget = /^gemini-3\.8-flash-(?:low|medium|high)$/u.test(wireModel)
-  const requestContents = groupClaudeFunctionResponses(contents, options.model)
+  const requestContents = [...groupClaudeFunctionResponses(contents, options.model)]
+  appendAgyContinuation(requestContents, wireModel)
   const request: Record<string, unknown> = { contents: requestContents }
   // V3 AgentLoop stores instructions in system messages. One-shot callers may
   // still provide a separate preface; preserve both in their original order.
@@ -1095,10 +1124,9 @@ function buildPayloadFromContents(
       ? message.content.flatMap(block => block.type === 'text' && block.text.trim() ? [{ text: block.text }] : [])
       : []),
   ]
-  if (systemParts.length > 0) request.systemInstruction = { parts: systemParts }
+  if (systemParts.length > 0) request.systemInstruction = rewriteSystemInstruction({ parts: systemParts })
   const generationConfig: Record<string, unknown> = {}
   if (options.maxTokens !== undefined) generationConfig.maxOutputTokens = boundedInteger(options.maxTokens, 1, 1_000_000, 'maxTokens')
-  else if (usesCapturedGemini38ThinkingBudget) generationConfig.maxOutputTokens = 65536
   if (options.temperature !== undefined) generationConfig.temperature = boundedNumber(options.temperature, -100, 100, 'temperature')
   if (options.stop !== undefined) generationConfig.stopSequences = options.stop.slice(0, 16).map(item => item.slice(0, 256))
   if (options.reasoningEffort !== undefined) generationConfig.thinkingConfig = { thinkingLevel: String(options.reasoningEffort) }
@@ -1108,35 +1136,39 @@ function buildPayloadFromContents(
     if (declarations.length > 0) request.tools = [{ functionDeclarations: declarations }]
   }
   const tieredModel = resolveModelForTier(options.model, options.reasoningEffort)
-  const resolved = resolveModelWithTier(usesCapturedGemini38ThinkingBudget ? wireModel : tieredModel)
+  const resolved = resolveModelWithTier(tieredModel)
   const nativeModel = getAgyNativeModel(wireModel)
-  const usesAdaptiveNativeThinking = isGeminiArgonModel(wireModel) || isGeminiCarbonModel(wireModel) || nativeModel?.supportsAdaptiveThinking === true
-  const usesNumericGeminiThinkingBudget = !wireModel.toLowerCase().includes('claude') && !usesAdaptiveNativeThinking && typeof resolved.thinkingBudget === 'number'
+  const usesCapturedAgyNativeConfig = isGeminiArgonModel(wireModel)
+    || isGeminiCarbonModel(wireModel)
+    || supportsGeminiXHigh(wireModel)
+    || /^gemini-3\.8-flash-(?:low|medium|high)$/iu.test(wireModel)
+    || nativeModel?.supportsAdaptiveThinking === true
+  const usesNumericGeminiThinkingBudget = !wireModel.toLowerCase().includes('claude') && !usesCapturedAgyNativeConfig && typeof resolved.thinkingBudget === 'number'
   const requestedEffort = normalizeReasoningEffort(options.reasoningEffort)
   const thinkingLevel = requestedEffort ?? resolved.thinkingLevel
   if (wireModel.toLowerCase().includes('claude')) {
     applyClaudeToolHardening(request)
     applyClaudeTransforms(request, {
       model: wireModel,
-      ...(resolved.thinkingBudget === undefined || usesAdaptiveNativeThinking ? {} : { tierThinkingBudget: resolved.thinkingBudget }),
-      ...(usesAdaptiveNativeThinking || (options.reasoningEffort === undefined && resolved.thinkingBudget === undefined) ? {} : { normalizedThinking: { includeThoughts: true, ...(resolved.thinkingBudget === undefined ? {} : { thinkingBudget: resolved.thinkingBudget }) } }),
+      ...(resolved.thinkingBudget === undefined || usesCapturedAgyNativeConfig ? {} : { tierThinkingBudget: resolved.thinkingBudget }),
+      ...(usesCapturedAgyNativeConfig || (options.reasoningEffort === undefined && resolved.thinkingBudget === undefined) ? {} : { normalizedThinking: { includeThoughts: true, ...(resolved.thinkingBudget === undefined ? {} : { thinkingBudget: resolved.thinkingBudget }) } }),
       cleanJSONSchema: cleanClaudeSchema,
     })
-    if (usesAdaptiveNativeThinking) {
+    if (usesCapturedAgyNativeConfig) {
       const transformedConfig = isRecord(request.generationConfig) ? request.generationConfig : {}
-      applyAgyNativeGenerationConfig(wireModel, transformedConfig)
+      applyAgyNativeGenerationConfig(wireModel, transformedConfig, { preserveThinkingBudget: false })
       request.generationConfig = transformedConfig
     }
   } else {
     applyGeminiTransforms(request, {
       model: wireModel,
-      ...(thinkingLevel === undefined || usesNumericGeminiThinkingBudget || usesAdaptiveNativeThinking ? {} : { tierThinkingLevel: thinkingLevel as 'low' | 'medium' | 'high' }),
-      ...(resolved.thinkingBudget === undefined || usesAdaptiveNativeThinking ? {} : { tierThinkingBudget: resolved.thinkingBudget }),
-      ...(usesAdaptiveNativeThinking || (options.reasoningEffort === undefined && resolved.thinkingBudget === undefined) ? {} : { normalizedThinking: { includeThoughts: true, ...(resolved.thinkingBudget === undefined ? {} : { thinkingBudget: resolved.thinkingBudget }) } }),
+      ...(thinkingLevel === undefined || usesNumericGeminiThinkingBudget || usesCapturedAgyNativeConfig ? {} : { tierThinkingLevel: thinkingLevel as 'low' | 'medium' | 'high' | 'xhigh' }),
+      ...(resolved.thinkingBudget === undefined || usesCapturedAgyNativeConfig ? {} : { tierThinkingBudget: resolved.thinkingBudget }),
+      ...(usesCapturedAgyNativeConfig || (options.reasoningEffort === undefined && resolved.thinkingBudget === undefined) ? {} : { normalizedThinking: { includeThoughts: true, ...(resolved.thinkingBudget === undefined ? {} : { thinkingBudget: resolved.thinkingBudget }) } }),
     })
-    if (usesAdaptiveNativeThinking) {
+    if (usesCapturedAgyNativeConfig) {
       const transformedConfig = isRecord(request.generationConfig) ? request.generationConfig : {}
-      applyAgyNativeGenerationConfig(wireModel, transformedConfig)
+      applyAgyNativeGenerationConfig(wireModel, transformedConfig, { preserveThinkingBudget: false })
       request.generationConfig = transformedConfig
     } else if (usesNumericGeminiThinkingBudget && typeof resolved.thinkingBudget === 'number') {
       const transformedConfig = isRecord(request.generationConfig) ? request.generationConfig : {}
@@ -1536,24 +1568,29 @@ function requireToolCallId(value: unknown): string {
   return value
 }
 
-function normalizeReasoningEffort(value: GenerateOptions['reasoningEffort']): 'low' | 'medium' | 'high' | undefined {
+function normalizeReasoningEffort(value: GenerateOptions['reasoningEffort']): 'low' | 'medium' | 'high' | 'xhigh' | undefined {
   if (value === undefined) return undefined
   const normalized = String(value).toLowerCase()
   if (normalized === 'minimal' || normalized === 'low') return 'low'
   if (normalized === 'medium') return 'medium'
   if (normalized === 'high') return 'high'
+  if (normalized === 'xhigh') return 'xhigh'
   return undefined
 }
 
 function resolveModelForTier(model: string, reasoningEffort?: GenerateOptions['reasoningEffort']): string {
   const effort = normalizeReasoningEffort(reasoningEffort)
-  if (effort === undefined || /-(?:minimal|low|medium|high)$/iu.test(model)) return model
+  if (effort === undefined || /-(?:minimal|low|medium|high|xhigh)$/iu.test(model)) return model
+  if (supportsGeminiXHigh(model)) {
+    return `${model}-${effort}`
+  }
+  const cappedEffort = effort === 'xhigh' ? 'high' : effort
   if (
     /^(?:antigravity-)?gemini-3\.[58]-flash$/iu.test(model)
     || /^(?:antigravity-)?gemini-4-(?:argon|carbon)$/iu.test(model)
     || /^(?:antigravity-)?claude-(?:opus|sonnet)-5-5$/iu.test(model)
   ) {
-    return `${model}-${effort}`
+    return `${model}-${cappedEffort}`
   }
   return model
 }
